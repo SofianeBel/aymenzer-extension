@@ -1,5 +1,5 @@
 const YOUTUBE_CHANNEL_ID = "UCjvsS_pdoMNIK73E4iJfsmw"; // Remplacez par l'ID de la chaîne d'AymenZeR
-const TWITCH_USERNAME = "SkyrrozTV";
+const TWITCH_USERNAME = "talmo";
 const TIKTOK_USERNAME = "aymenkoreaplayer";
 const TWITCH_CLIENT_ID = "8xiery290o0ioczddjogf337p1etp7";
 const TWITCH_CLIENT_SECRET = "sz36mo8huivxyd3bqtbzhqq2ukkk7y"; // Ajoutez votre client_secret ici
@@ -120,8 +120,14 @@ async function checkTwitch() {
     const streamData = await streamResponse.json();
 
     if (streamData && streamData.data) {
-      const wasLive = await getIsLive(); // Fonction pour obtenir l'état précédent
+      const wasLive = await getIsLive();
       isLive = streamData.data.length > 0;
+
+      // Stocker les données du stream et l'état isLive
+      chrome.storage.local.set({ 
+        [STORAGE_KEYS.IS_LIVE]: isLive,
+        'streamData': streamData // Ajout des données du stream
+      });
 
       if (isLive && !wasLive) {
         const streamThumbnailUrl = streamData.data[0].thumbnail_url
@@ -142,17 +148,12 @@ async function checkTwitch() {
         });
         
         chrome.storage.local.set({ 
-          [STORAGE_KEYS.IS_LIVE]: true,
           'twitchThumbnailUrl': streamThumbnailUrl
         });
-      } else if (!isLive && wasLive) {
-        chrome.storage.local.set({ [STORAGE_KEYS.IS_LIVE]: false });
       }
-    } else {
-      console.error('Structure de réponse Twitch inattendue:', streamData);
     }
   } catch (error) {
-    console.error('Erreur test:', error);
+    console.error('Erreur lors de la vérification Twitch:', error);
   }
 }
 

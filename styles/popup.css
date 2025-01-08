@@ -209,3 +209,41 @@ body {
 .login-button i {
   margin-right: 5px;
 }
+
+.status-indicator {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: inline-block;
+  margin-left: 8px;
+}
+
+.status-indicator.live {
+  background-color: #eb0400;
+  color: white;
+}
+
+.status-indicator.offline {
+  background-color: #6e6e73;
+  color: white;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.stream-preview.offline {
+  display: none;
+}
+
+.uptime.offline {
+  display: none;
+}
+
+.game-name.offline {
+  display: none;
+}
+
+.stream-preview.offline {
+  display: none;
+}
