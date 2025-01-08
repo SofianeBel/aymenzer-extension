@@ -28,10 +28,11 @@
     "scopes": [
       "user:read:subscriptions"
     ],
-    "redirect_url": "https://<nhmdfoddhldcnggidaldaieggjmpmphf>.chromiumapp.org/"
+    "redirect_url": "https://${chrome.runtime.id}.chromiumapp.org/oauth2"
   },
   "web_accessible_resources": [{
     "resources": ["icons/*"],
     "matches": ["<all_urls>"]
-  }]
+  }],
+  "key": "nhmdfoddhldcnggidaldaieggjmpmphf"
 }

@@ -1,7 +1,7 @@
 chrome.storage.local.clear(); // Nettoie le stockage local
 const TWITCH_USERNAME = "AymenZeR";
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // Animation de démarrage
   const splashScreen = document.querySelector('.splash-screen');
   const neonLogo = document.querySelector('.neon-logo');
@@ -104,19 +104,33 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialisation du statut lors du chargement de la popup
   updateStatus();
 
-  // Ajouter l'écouteur d'événements pour le bouton de connexion
-  document.getElementById('twitchLogin').addEventListener('click', () => {
-    chrome.runtime.sendMessage({ action: 'authenticateTwitch' })
-      .then(response => {
-        if (response && response.success) {
-          console.log('Connexion Twitch réussie');
-          updateStatus();
-        } else {
-          console.error('Échec de la connexion:', response?.error);
-        }
-      })
-      .catch(error => {
-        console.error('Erreur de connexion:', error);
-      });
+  const twitchLoginButton = document.getElementById('twitchLogin');
+  
+  // Fonction pour vérifier le statut initial
+  async function checkInitialStatus() {
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'checkTwitchStatus' });
+      updateStreamInfo(response.streamData || { data: [] });
+    } catch (error) {
+      console.error('Erreur lors de la vérification initiale:', error);
+    }
+  }
+
+  // Vérifier le statut au chargement
+  await checkInitialStatus();
+
+  // Gestionnaire de clic pour le bouton de connexion
+  twitchLoginButton.addEventListener('click', async () => {
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'authenticateTwitch' });
+      if (response && response.success) {
+        console.log('Connexion Twitch réussie');
+        await checkInitialStatus(); // Rafraîchir les informations après connexion
+      } else {
+        console.error('Échec de la connexion:', response?.error);
+      }
+    } catch (error) {
+      console.error('Erreur de connexion:', error);
+    }
   });
 });

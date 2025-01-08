@@ -233,11 +233,10 @@ function getIsLive() {
 
 async function authenticateTwitch() {
   try {
-    const redirectURL = chrome.identity.getRedirectURL();
+    const redirectURL = chrome.identity.getRedirectURL('oauth2');
     const clientId = TWITCH_CLIENT_ID;
     const scopes = 'user:read:subscriptions';
     
-    // Ajout des paramètres nécessaires pour Twitch OAuth
     const authUrl = `https://id.twitch.tv/oauth2/authorize?` +
       `client_id=${clientId}` +
       `&redirect_uri=${encodeURIComponent(redirectURL)}` +
@@ -245,37 +244,24 @@ async function authenticateTwitch() {
       `&scope=${encodeURIComponent(scopes)}` +
       `&force_verify=true`;
     
-    console.log('URL d\'authentification:', authUrl);
-    
     const responseUrl = await chrome.identity.launchWebAuthFlow({
       url: authUrl,
       interactive: true
     });
-    
-    console.log('URL de réponse:', responseUrl);
     
     if (responseUrl) {
       const hash = new URL(responseUrl).hash;
       const accessToken = new URLSearchParams(hash.substr(1)).get('access_token');
       
       if (accessToken) {
-        // Vérifier que le token est valide
-        const validateResponse = await fetch('https://id.twitch.tv/oauth2/validate', {
-          headers: {
-            'Authorization': `OAuth ${accessToken}`
-          }
-        });
-        
-        if (validateResponse.ok) {
-          chrome.storage.local.set({ 'twitchUserToken': accessToken });
-          return accessToken;
-        }
+        chrome.storage.local.set({ 'twitchUserToken': accessToken });
+        return { success: true, token: accessToken };
       }
     }
-    throw new Error('Échec de l\'authentification');
+    return { success: false, error: 'Échec de l\'authentification' };
   } catch (error) {
     console.error('Erreur d\'authentification Twitch:', error);
-    return null;
+    return { success: false, error: error.message };
   }
 }
 
@@ -318,17 +304,7 @@ async function checkSubscription() {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'authenticateTwitch') {
-    authenticateTwitch()
-      .then(token => {
-        if (token) {
-          sendResponse({ success: true, token });
-        } else {
-          sendResponse({ success: false, error: 'Échec de l\'authentification' });
-        }
-      })
-      .catch(error => {
-        sendResponse({ success: false, error: error.message });
-      });
-    return true; // Indique que nous allons envoyer une réponse de manière asynchrone
+    authenticateTwitch().then(sendResponse);
+    return true; // Indique que nous enverrons une réponse asynchrone
   }
 });
