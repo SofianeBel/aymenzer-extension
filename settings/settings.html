@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Paramètres - AymenZeR Notifier</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+      }
+      label {
+        display: block;
+        margin-bottom: 10px;
+      }
+      input[type="checkbox"] {
+        margin-right: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Paramètres</h1>
+    <form id="settingsForm">
+      <label>
+        <input type="checkbox" id="enableNotifications" />
+        Activer les notifications
+      </label>
+      <label>
+        Fréquence de vérification :
+        <select id="checkFrequency">
+          <option value="5">Toutes les 5 minutes</option>
+          <option value="15">Toutes les 15 minutes</option>
+          <option value="30">Toutes les 30 minutes</option>
+        </select>
+      </label>
+      <button type="submit">Enregistrer</button>
+    </form>
+    <script src="settings.js"></script>
+  </body>
+</html>
