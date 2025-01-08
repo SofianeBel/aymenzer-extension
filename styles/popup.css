@@ -1,45 +1,211 @@
 body {
-    font-family: Arial, sans-serif;
-    width: 300px;
-    padding: 10px;
+  width: 300px;
+  background-color: #18181b;
+  color: #efeff1;
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+.stream-card {
+  background-color: #0e0e10;
+  border-radius: 10px;
+  padding: 15px;
+  margin: 10px;
+}
+
+.stream-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.profile-image {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  margin-right: 10px;
+}
+
+.stream-info {
+  flex-grow: 1;
+}
+
+.streamer-name {
+  font-weight: 600;
+  color: #efeff1;
+  margin: 0;
+}
+
+.live-indicator {
+  background-color: #eb0400;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: inline-block;
+  margin-left: 8px;
+}
+
+.viewer-count {
+  color: #adadb8;
+  font-size: 12px;
+}
+
+.game-name {
+  color: #adadb8;
+  font-size: 14px;
+  margin: 5px 0;
+}
+
+.stream-preview {
+  width: 100%;
+  border-radius: 8px;
+  margin: 10px 0;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.action-button {
+  flex: 1;
+  padding: 8px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+
+.twitch-button {
+  background-color: #9146ff;
+  color: white;
+}
+
+.game-button {
+  background-color: #00b5ad;
+  color: white;
+}
+
+.uptime {
+  color: #adadb8;
+  font-size: 12px;
+  text-align: center;
+  margin-top: 10px;
+}
+
+.social-links {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 15px;
+  padding: 10px;
+}
+
+.social-link {
+  color: #adadb8;
+  text-decoration: none;
+  font-size: 20px;
+}
+
+.splash-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.neon-logo {
+  width: 200px;
+  height: auto;
+  opacity: 0;
+  animation: neonPulse 1s ease-in forwards;
+}
+
+.electric-explosion {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, #9146FF 0%, transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.main-content {
+  opacity: 0;
+  transition: opacity 0.5s ease-in;
+}
+
+.main-content.visible {
+  opacity: 1;
+}
+
+.main-logo {
+  width: 100px;
+  height: auto;
+  display: block;
+  margin: 0 auto 15px;
+}
+
+@keyframes neonPulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
   }
-  
-  h1 {
-    font-size: 18px;
-    text-align: center;
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
   }
-  
-  #status ul {
-    list-style-type: none;
-    padding: 0;
+  75% {
+    opacity: 1;
+    transform: scale(1);
   }
-  
-  #status li {
-    display: flex;
-    align-items: center;
-    margin-bottom: 10px;
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
   }
-  
-  #status img.thumbnail {
-    width: 60px;
-    height: 45px;
-    object-fit: cover;
-    margin-right: 10px;
-    border-radius: 4px;
+}
+
+@keyframes electricExplosion {
+  0% {
+    opacity: 0;
+    transform: scale(0);
   }
-  
-  button {
-    width: 100%;
-    padding: 8px;
-    margin-top: 5px;
-    border: none;
-    border-radius: 4px;
-    background-color: #4CAF50;
-    color: white;
-    cursor: pointer;
-    font-size: 14px;
+  50% {
+    opacity: 1;
+    transform: scale(1);
   }
-  
-  button:hover {
-    background-color: #45a049;
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
   }
+}
+
+.login-button {
+  background-color: #772ce8;
+  color: white;
+  transition: background-color 0.2s;
+}
+
+.login-button:hover {
+  background-color: #9146ff;
+}
+
+.login-button.connected {
+  background-color: #00b5ad;
+  cursor: default;
+}
+
+.login-button i {
+  margin-right: 5px;
+}
