@@ -1,5 +1,5 @@
 const YOUTUBE_CHANNEL_ID = "UCjvsS_pdoMNIK73E4iJfsmw"; // Remplacez par l'ID de la chaîne d'AymenZeR
-const TWITCH_USERNAME = "talmo";
+const TWITCH_USERNAME = "AymenZeR";
 const TIKTOK_USERNAME = "aymenkoreaplayer";
 const TWITCH_CLIENT_ID = "8xiery290o0ioczddjogf337p1etp7";
 const TWITCH_CLIENT_SECRET = "sz36mo8huivxyd3bqtbzhqq2ukkk7y"; // Ajoutez votre client_secret ici

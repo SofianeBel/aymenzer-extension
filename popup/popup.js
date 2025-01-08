@@ -1,3 +1,6 @@
+chrome.storage.local.clear(); // Nettoie le stockage local
+const TWITCH_USERNAME = "AymenZeR";
+
 document.addEventListener('DOMContentLoaded', () => {
   // Animation de démarrage
   const splashScreen = document.querySelector('.splash-screen');
@@ -18,7 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 1000);
 
   const statusDiv = document.getElementById('status');
-  const TWITCH_USERNAME = "AymenZeR";
 
   function updateStreamInfo(streamData) {
     const viewerCount = document.getElementById('viewerCount');

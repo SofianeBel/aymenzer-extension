@@ -1,5 +1,5 @@
 body {
-  width: 300px;
+  width: 400px; /* au lieu de 300px */
   background-color: #18181b;
   color: #efeff1;
   font-family: 'Inter', sans-serif;
@@ -21,10 +21,14 @@ body {
 }
 
 .profile-image {
-  width: 40px;
-  height: 40px;
+  width: 200px;  /* ou la taille souhaitée */
+  height: 200px;
   border-radius: 50%;
   margin-right: 10px;
+  object-fit: cover; /* pour s'assurer que l'image garde ses proportions */
+  image-rendering: -webkit-optimize-contrast;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 .stream-info {
@@ -104,8 +108,8 @@ body {
   gap: 15px;
   margin-top: 15px;
   padding: 10px;
+  font-size: 20px;
 }
-
 .social-link {
   color: #adadb8;
   text-decoration: none;
