@@ -15,40 +15,88 @@ const NOTIFICATION_TYPES = {
 const STORAGE_KEYS = {
   LAST_YOUTUBE_VIDEO_ID: 'lastYouTubeVideoId',
   IS_LIVE: 'isLive',
-  LAST_TIKTOK_VIDEO_URL: 'lastTikTokVideoUrl'
+  LAST_TIKTOK_VIDEO_URL: 'lastTikTokVideoUrl',
+  YOUTUBE_DATA: 'youtubeData',
+  TWITCH_DATA: 'twitchData',
+  TIKTOK_DATA: 'tiktokData',
+  LAST_CHECK: 'lastCheck'
 };
 
 const DEFAULT_ICON = 'icons/A_AE_neon_1.png';
 
+const YOUTUBE_QUOTA_LIMIT = 10000; // Limite quotidienne de l'API YouTube
+const SEARCH_QUOTA_COST = 100; // Coût d'une requête search.list
+const MIN_CHECK_INTERVAL = 1; // Intervalle minimum en minutes
+const MAX_CHECK_INTERVAL = 60; // Intervalle maximum en minutes
+
+let dailyQuotaUsed = 0;
+let lastQuotaReset = new Date();
+
+function calculateYouTubeInterval() {
+  // Réinitialiser le quota utilisé si c'est un nouveau jour
+  const now = new Date();
+  if (now.getDate() !== lastQuotaReset.getDate()) {
+    dailyQuotaUsed = 0;
+    lastQuotaReset = now;
+  }
+
+  // Calculer le quota restant
+  const quotaRemaining = YOUTUBE_QUOTA_LIMIT - dailyQuotaUsed;
+  
+  // Calculer combien de requêtes nous pouvons encore faire aujourd'hui
+  const remainingRequests = Math.floor(quotaRemaining / SEARCH_QUOTA_COST);
+  
+  // Calculer combien de minutes restent dans la journée
+  const minutesInDay = 24 * 60;
+  const currentMinute = now.getHours() * 60 + now.getMinutes();
+  const remainingMinutes = minutesInDay - currentMinute;
+  
+  // Calculer l'intervalle optimal
+  let newInterval = Math.ceil(remainingMinutes / remainingRequests);
+  
+  // S'assurer que l'intervalle reste dans les limites
+  newInterval = Math.max(MIN_CHECK_INTERVAL, Math.min(newInterval, MAX_CHECK_INTERVAL));
+  
+  return newInterval;
+}
+
+async function updateYouTubeCheckInterval() {
+  const newInterval = calculateYouTubeInterval();
+  
+  // Mettre à jour uniquement l'alarme YouTube
+  await chrome.alarms.clear('checkYouTube');
+  chrome.alarms.create('checkYouTube', {
+    delayInMinutes: newInterval,
+    periodInMinutes: newInterval
+  });
+  
+  addLog(`Intervalle YouTube mis à jour: ${newInterval} minutes (Quota utilisé: ${dailyQuotaUsed})`);
+  return newInterval;
+}
+
 // chrome.alarms.create('checkContent', { periodInMinutes: CHECK_INTERVAL / 60 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'checkContent') {
-    console.log('Alarme déclenchée:', new Date().toLocaleString());
-    addLog(`Vérification périodique démarrée`);
-    
-    try {
-      await checkYouTube();
-      await checkTwitch();
-      await checkTikTok();
-      addLog(`Vérification périodique terminée`);
-    } catch (error) {
-      console.error('Erreur lors des vérifications:', error);
-      addLog(`Erreur lors des vérifications: ${error.message}`);
-    }
+  if (alarm.name === 'checkYouTube') {
+    await checkYouTube();
+  } else if (alarm.name === 'checkContent') {
+    await checkTwitch();
+    await checkTikTok();
   }
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  // Créer l'alarme avec un délai initial et une période
-  chrome.alarms.create("checkContent", { 
-    delayInMinutes: 0.1,  // Démarrer après 6 secondes
-    periodInMinutes: CHECK_INTERVAL / 60  // Période en minutes
+chrome.runtime.onInstalled.addListener(async () => {
+  // Créer des alarmes séparées pour chaque service
+  const youtubeInterval = await updateYouTubeCheckInterval();
+  
+  chrome.alarms.create('checkContent', {
+    delayInMinutes: 0.1,
+    periodInMinutes: CHECK_INTERVAL / 60
   });
   
-  // Initialiser le stockage
   chrome.storage.local.set({
     checkFrequency: CHECK_INTERVAL / 60,
+    youtubeCheckInterval: youtubeInterval,
     logs: [],
     isLive: false
   });
@@ -83,89 +131,57 @@ function addLog(message) {
 }
 
 async function checkYouTube() {
-  const apiKey = "AIzaSyBmUowucx1T8o8hPLJjeXp9TO6vJ6tzmu4"; 
-  const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${YOUTUBE_CHANNEL_ID}&order=date&type=video&key=${apiKey}`;
-
   try {
+    // Vérifier si on a des données récentes (moins de 5 minutes)
+    const storage = await chrome.storage.local.get([STORAGE_KEYS.YOUTUBE_DATA, STORAGE_KEYS.LAST_CHECK]);
+    const now = Date.now();
+    const lastCheck = storage[STORAGE_KEYS.LAST_CHECK]?.youtube || 0;
+    const timeSinceLastCheck = now - lastCheck;
+
+    // Si les données ont moins de 5 minutes, les utiliser
+    if (timeSinceLastCheck < 5 * 60 * 1000 && storage[STORAGE_KEYS.YOUTUBE_DATA]) {
+      console.log('Utilisation des données YouTube en cache');
+      return storage[STORAGE_KEYS.YOUTUBE_DATA];
+    }
+
+    // Sinon, faire une nouvelle requête
+    dailyQuotaUsed += SEARCH_QUOTA_COST;
+    
+    const apiKey = "AIzaSyBmUowucx1T8o8hPLJjeXp9TO6vJ6tzmu4";
+    const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${YOUTUBE_CHANNEL_ID}&order=date&type=video&key=${apiKey}`;
+
     const response = await fetch(apiUrl);
     const data = await response.json();
 
-    if (data.items && data.items.length > 0) {
-      const latestVideo = data.items[0];
-      const latestVideoId = latestVideo.id.videoId;
-      const latestVideoTitle = latestVideo.snippet.title;
-      const thumbnailUrl = latestVideo.snippet.thumbnails.medium.url;
+    // Sauvegarder les nouvelles données
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.YOUTUBE_DATA]: data,
+      [STORAGE_KEYS.LAST_CHECK]: {
+        ...storage[STORAGE_KEYS.LAST_CHECK],
+        youtube: now
+      }
+    });
 
-      chrome.storage.local.get([STORAGE_KEYS.LAST_YOUTUBE_VIDEO_ID], (result) => {
-        if (result[STORAGE_KEYS.LAST_YOUTUBE_VIDEO_ID] !== latestVideoId) {
-          // Télécharger la miniature avant de créer la notification
-          fetch(thumbnailUrl)
-            .then(response => response.blob())
-            .then(blob => {
-              const reader = new FileReader();
-              reader.onloadend = function() {
-                chrome.notifications.create(`YouTube_${latestVideoId}`, {
-                  type: 'image',
-                  iconUrl: chrome.runtime.getURL('icons/A_AE_neon_1.png'),
-                  imageUrl: thumbnailUrl,
-                  title: 'AymenZeR Notifier • maintenant',
-                  message: `📺 Nouvelle vidéo\n\n${latestVideoTitle}`,
-                  contextMessage: 'Special Events',
-                  priority: 2,
-                  buttons: [
-                    { title: '▶️ Regarder la vidéo' },
-                    { title: '🔕 Ne plus afficher' }
-                  ],
-                  requireInteraction: true,
-                  silent: false
-                }, (notificationId) => {
-                  if (chrome.runtime.lastError) {
-                    console.error('Erreur lors de la création de la notification YouTube:', chrome.runtime.lastError);
-                    addLog(`Erreur création notification YouTube: ${chrome.runtime.lastError.message}`);
-                  } else {
-                    addLog(`Notification YouTube créée: ${notificationId}`);
-                  }
-                });
-              }
-              reader.readAsDataURL(blob);
-            })
-            .catch(error => {
-              console.error('Erreur lors du téléchargement de la miniature:', error);
-              // Utiliser une icône par défaut en cas d'échec
-              chrome.notifications.create(`YouTube_${latestVideoId}`, {
-                type: 'basic',
-                iconUrl: DEFAULT_ICON,
-                title: 'Nouvelle vidéo YouTube d\'AymenZeR !',
-                message: latestVideoTitle,
-                buttons: [{ title: 'Regarder' }],
-                requireInteraction: true
-              });
-            });
-
-          chrome.storage.local.set({
-            [STORAGE_KEYS.LAST_YOUTUBE_VIDEO_ID]: latestVideoId,
-            'youtubeThumbnailUrl': thumbnailUrl
-          }, () => {
-            console.log('YouTube data stored:', {
-              videoId: latestVideoId,
-              thumbnailUrl: thumbnailUrl
-            });
-            addLog(`Nouvelle vidéo YouTube détectée: ${latestVideoTitle}`);
-          });
-        }
-      });
-    }
+    return data;
   } catch (error) {
-    console.error("Erreur lors de la récupération des vidéos YouTube:", error);
+    console.error('Erreur YouTube:', error);
     addLog(`Erreur YouTube: ${error.message}`);
+    throw error;
   }
 }
 
 async function checkTwitch() {
-  addLog(`Début de la vérification Twitch pour ${TWITCH_USERNAME}`);
-  console.log('Démarrage checkTwitch:', new Date().toLocaleString());
-  
   try {
+    const storage = await chrome.storage.local.get([STORAGE_KEYS.TWITCH_DATA, STORAGE_KEYS.LAST_CHECK]);
+    const now = Date.now();
+    const lastCheck = storage[STORAGE_KEYS.LAST_CHECK]?.twitch || 0;
+    const timeSinceLastCheck = now - lastCheck;
+
+    if (timeSinceLastCheck < 5 * 60 * 1000 && storage[STORAGE_KEYS.TWITCH_DATA]) {
+      console.log('Utilisation des données Twitch en cache');
+      return storage[STORAGE_KEYS.TWITCH_DATA];
+    }
+
     // Obtenir le token
     const tokenResponse = await fetch('https://id.twitch.tv/oauth2/token', {
       method: 'POST',
@@ -210,17 +226,19 @@ async function checkTwitch() {
     addLog(`État du stream: ${isLive ? 'En ligne' : 'Hors ligne'}`);
     
     await chrome.storage.local.set({
-      isLive: isLive,
-      streamData: streamData
+      [STORAGE_KEYS.TWITCH_DATA]: streamData,
+      [STORAGE_KEYS.LAST_CHECK]: {
+        ...storage[STORAGE_KEYS.LAST_CHECK],
+        twitch: now
+      }
     });
 
     if (isLive && !wasLive) {
       chrome.notifications.create(`Twitch_${Date.now()}`, {
-        type: 'image',
+        type: 'basic',
         iconUrl: chrome.runtime.getURL('icons/A_AE_neon_1.png'),
-        imageUrl: streamData.data[0].thumbnail_url.replace("{width}", "320").replace("{height}", "180"),
         title: 'AymenZeR Notifier • maintenant',
-        message: `${streamData.data[0].title}\n\n🎮 ${streamData.data[0].game_name}\n👥 ${streamData.data[0].viewer_count.toLocaleString()} spectateurs`,
+        message: `🔴 En direct\n\n${streamData.data[0].title}\n\n🎮 ${streamData.data[0].game_name}\n👥 ${streamData.data[0].viewer_count.toLocaleString()} spectateurs`,
         contextMessage: 'Special Events',
         priority: 2,
         buttons: [
@@ -232,9 +250,12 @@ async function checkTwitch() {
       });
       addLog(`Notification créée pour le stream de ${streamData.data[0].user_name}`);
     }
+
+    return streamData;
   } catch (error) {
-    console.error('Erreur dans checkTwitch:', error);
+    console.error('Erreur Twitch:', error);
     addLog(`Erreur Twitch: ${error.message}`);
+    throw error;
   }
 }
 
@@ -311,6 +332,21 @@ function checkAlarms() {
 checkAlarms();
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'checkTwitchStatus') {
+    chrome.storage.local.get([STORAGE_KEYS.TWITCH_DATA], async (result) => {
+      if (result[STORAGE_KEYS.TWITCH_DATA]) {
+        sendResponse({ streamData: result[STORAGE_KEYS.TWITCH_DATA] });
+      } else {
+        try {
+          const streamData = await checkTwitch();
+          sendResponse({ streamData });
+        } catch (error) {
+          sendResponse({ error: error.message });
+        }
+      }
+    });
+    return true; // Important pour l'async
+  }
   switch (request.action) {
     case 'checkYouTube':
       checkYouTube().then(() => sendResponse({ success: true }))
@@ -408,6 +444,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'getLogs':
       chrome.storage.local.get(['logs'], (result) => {
         sendResponse({ logs: result.logs || [] });
+      });
+      return true;
+
+    case 'getYouTubeQuotaInfo':
+      const now = new Date();
+      const nextReset = new Date(lastQuotaReset);
+      nextReset.setDate(nextReset.getDate() + 1);
+      nextReset.setHours(0, 0, 0, 0);
+
+      sendResponse({
+        success: true,
+        data: {
+          quotaLimit: YOUTUBE_QUOTA_LIMIT,
+          quotaUsed: dailyQuotaUsed,
+          searchCost: SEARCH_QUOTA_COST,
+          currentInterval: calculateYouTubeInterval(),
+          nextReset: nextReset.toLocaleString()
+        }
       });
       return true;
 

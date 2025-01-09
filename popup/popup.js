@@ -1,5 +1,17 @@
-chrome.storage.local.clear(); // Nettoie le stockage local
-const TWITCH_USERNAME = "AymenZeR";
+// Supprimer cette ligne car elle efface les données persistées
+// chrome.storage.local.clear();
+
+
+// Ajouter la définition des clés de stockage
+const STORAGE_KEYS = {
+  LAST_YOUTUBE_VIDEO_ID: 'lastYouTubeVideoId',
+  IS_LIVE: 'isLive',
+  LAST_TIKTOK_VIDEO_URL: 'lastTikTokVideoUrl',
+  YOUTUBE_DATA: 'youtubeData',
+  TWITCH_DATA: 'twitchData',
+  TIKTOK_DATA: 'tiktokData',
+  LAST_CHECK: 'lastCheck'
+};
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Animation de démarrage
@@ -134,9 +146,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function updateStatus() {
-    chrome.storage.local.get(['streamData'], (result) => {
+    chrome.storage.local.get([STORAGE_KEYS.TWITCH_DATA, STORAGE_KEYS.IS_LIVE], (result) => {
       console.log('Données récupérées du stockage:', result);
-      updateStreamInfo(result.streamData || { data: [] });
+      
+      // Utiliser les données Twitch stockées
+      if (result[STORAGE_KEYS.TWITCH_DATA]) {
+        updateStreamInfo(result[STORAGE_KEYS.TWITCH_DATA]);
+      } else {
+        updateStreamInfo({ data: [] });
+      }
     });
   }
 
@@ -149,7 +167,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function checkInitialStatus() {
     try {
       const response = await chrome.runtime.sendMessage({ action: 'checkTwitchStatus' });
-      updateStreamInfo(response.streamData || { data: [] });
+      if (response && response.streamData) {
+        updateStreamInfo(response.streamData);
+      } else {
+        // Si pas de données, vérifier dans le stockage local
+        chrome.storage.local.get([STORAGE_KEYS.TWITCH_DATA], (result) => {
+          updateStreamInfo(result[STORAGE_KEYS.TWITCH_DATA] || { data: [] });
+        });
+      }
     } catch (error) {
       console.error('Erreur lors de la vérification initiale:', error);
     }

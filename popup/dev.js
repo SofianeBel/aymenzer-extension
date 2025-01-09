@@ -14,6 +14,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const testTwitchNotifBtn = document.getElementById('testTwitchNotifBtn');
   const testTikTokNotifBtn = document.getElementById('testTikTokNotifBtn');
 
+  // Ajouter les nouveaux éléments
+  const quotaInfoBtn = document.getElementById('quotaInfoBtn');
+  const quotaOutput = document.getElementById('quotaOutput');
+
   // Fonction pour envoyer un message au background script
   function sendMessage(action) {
     return new Promise((resolve, reject) => {
@@ -25,6 +29,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     });
+  }
+
+  // Fonction pour formater les informations de quota
+  function formatQuotaInfo(quotaInfo) {
+    return `
+### Quota YouTube
+
+- **Quota quotidien total**: ${quotaInfo.quotaLimit} unités
+- **Quota utilisé**: ${quotaInfo.quotaUsed} unités
+- **Quota restant**: ${quotaInfo.quotaLimit - quotaInfo.quotaUsed} unités
+- **Intervalle actuel**: ${quotaInfo.currentInterval} minutes
+- **Requêtes restantes estimées**: ${Math.floor((quotaInfo.quotaLimit - quotaInfo.quotaUsed) / quotaInfo.searchCost)}
+- **Coût par requête**: ${quotaInfo.searchCost} unités
+- **Prochain reset**: ${quotaInfo.nextReset}
+    `;
   }
 
   // Ajout des écouteurs d'événements pour les boutons existants
@@ -114,6 +133,21 @@ document.addEventListener('DOMContentLoaded', () => {
         logsOutput.textContent = 'Aucun log disponible.';
       }
     });
+  });
+
+  // Ajouter l'écouteur pour le bouton de quota
+  quotaInfoBtn?.addEventListener('click', async () => {
+    try {
+      const response = await sendMessage('getYouTubeQuotaInfo');
+      if (response && response.success) {
+        quotaOutput.innerHTML = formatQuotaInfo(response.data);
+      } else {
+        quotaOutput.textContent = 'Erreur lors de la récupération des informations de quota.';
+      }
+    } catch (error) {
+      console.error('Erreur:', error);
+      quotaOutput.textContent = `Erreur: ${error.message}`;
+    }
   });
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
