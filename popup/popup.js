@@ -22,6 +22,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const statusDiv = document.getElementById('status');
 
+  // Ajouter un écouteur pour les changements de stockage
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local') {
+      if (changes.streamData || changes.isLive) {
+        const newStreamData = changes.streamData ? changes.streamData.newValue : null;
+        const isLive = changes.isLive ? changes.isLive.newValue : null;
+        
+        if (newStreamData) {
+          updateStreamInfo(newStreamData);
+        } else {
+          // Si on n'a que isLive qui change, récupérer les données existantes
+          chrome.storage.local.get(['streamData'], (result) => {
+            updateStreamInfo(result.streamData || { data: [] });
+          });
+        }
+      }
+    }
+  });
+
   function updateStreamInfo(streamData) {
     const viewerCount = document.getElementById('viewerCount');
     const viewerContainer = document.getElementById('viewerContainer');
@@ -31,8 +50,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const streamStatus = document.getElementById('streamStatus');
     const twitchLoginButton = document.getElementById('twitchLogin');
     
+    console.log('Mise à jour des informations du stream:', streamData);
+
+    // Vérifier si le stream est en ligne directement depuis les données
+    const isStreamLive = streamData && streamData.data && streamData.data.length > 0;
+    console.log('État du stream:', isStreamLive ? 'En ligne' : 'Hors ligne');
+
     // Vérifier l'état de connexion
-    chrome.storage.local.get(['twitchUserToken', 'isLive'], (result) => {
+    chrome.storage.local.get(['twitchUserToken'], (result) => {
+      // Gestion du bouton de connexion
       if (result.twitchUserToken) {
         twitchLoginButton.textContent = '✓ Connecté';
         twitchLoginButton.classList.add('connected');
@@ -43,25 +69,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         twitchLoginButton.disabled = false;
       }
 
-      // Gérer l'état online/offline
-      if (result.isLive && streamData.data && streamData.data.length > 0) {
+      // Mise à jour de l'interface en fonction du statut du stream
+      if (isStreamLive) {
         const stream = streamData.data[0];
-        
-        // Mettre à jour le statut et les éléments visuels
+        console.log('Informations du stream:', stream);
+
+        // Mettre à jour le statut
         streamStatus.textContent = 'LIVE';
         streamStatus.classList.remove('offline');
         streamStatus.classList.add('live');
         
-        // Afficher les informations de stream
+        // Afficher les informations du stream
         viewerContainer.classList.remove('hidden');
-        viewerCount.textContent = stream.viewer_count;
+        viewerCount.textContent = stream.viewer_count.toLocaleString();
         gameName.textContent = stream.game_name;
         gameName.classList.remove('offline');
         
-        // Afficher la preview
-        streamPreview.src = stream.thumbnail_url
+        // Mettre à jour la preview
+        const thumbnailUrl = stream.thumbnail_url
           .replace('{width}', '320')
           .replace('{height}', '180');
+        streamPreview.src = thumbnailUrl;
         streamPreview.classList.remove('offline');
         
         // Calculer et afficher l'uptime
@@ -72,13 +100,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         const minutes = Math.floor((diff % 3600000) / 60000);
         uptime.textContent = `Uptime: ${hours}h${minutes.toString().padStart(2, '0')}`;
         uptime.classList.remove('offline');
+
+        // Mettre à jour le stockage local avec le nouvel état
+        chrome.storage.local.set({ 
+          isLive: true,
+          streamData: streamData
+        });
       } else {
+        console.log('Stream hors ligne - Mise à jour de l\'interface');
         // État offline
         streamStatus.textContent = 'OFFLINE';
         streamStatus.classList.remove('live');
         streamStatus.classList.add('offline');
         
-        // Cacher les éléments non pertinents
+        // Cacher les éléments
         viewerContainer.classList.add('hidden');
         gameName.classList.add('offline');
         streamPreview.classList.add('offline');
@@ -87,17 +122,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Nettoyer les contenus
         gameName.textContent = '';
         streamPreview.src = '';
+        uptime.textContent = '';
+
+        // Mettre à jour le stockage local avec le nouvel état
+        chrome.storage.local.set({ 
+          isLive: false,
+          streamData: null
+        });
       }
     });
   }
 
   function updateStatus() {
-    chrome.storage.local.get(['lastYouTubeVideoId', 'isLive', 'lastTikTokVideoUrl', 'youtubeThumbnailUrl', 'twitchThumbnailUrl', 'tiktokThumbnailUrl', 'streamData'], (result) => {
-      if (result.isLive && result.streamData) {
-        updateStreamInfo(result.streamData);
-      } else {
-        updateStreamInfo({ data: [] }); // Pour afficher l'état offline
-      }
+    chrome.storage.local.get(['streamData'], (result) => {
+      console.log('Données récupérées du stockage:', result);
+      updateStreamInfo(result.streamData || { data: [] });
     });
   }
 
