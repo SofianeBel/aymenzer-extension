@@ -1,8 +1,8 @@
-const YOUTUBE_CHANNEL_ID = "UCjvsS_pdoMNIK73E4iJfsmw"; // Remplacez par l'ID de la chaîne d'AymenZeR
-const TWITCH_USERNAME = "MrSavage";
+const YOUTUBE_CHANNEL_ID = "UCjvsS_pdoMNIK73E4iJfsmw";
+const TWITCH_USERNAME = "aymenzer";
 const TIKTOK_USERNAME = "aymenkoreaplayer";
 const TWITCH_CLIENT_ID = "8xiery290o0ioczddjogf337p1etp7";
-const TWITCH_CLIENT_SECRET = "sz36mo8huivxyd3bqtbzhqq2ukkk7y"; // Ajoutez votre client_secret ici
+const TWITCH_CLIENT_SECRET = "sz36mo8huivxyd3bqtbzhqq2ukkk7y";
 
 const CHECK_INTERVAL = 30; // Vérification toutes les 30 secondes pour les tests
 
@@ -83,7 +83,7 @@ function addLog(message) {
 }
 
 async function checkYouTube() {
-  const apiKey = "YOUR_YOUTUBE_API_KEY"; // Remplacez par votre clé API YouTube
+  const apiKey = "AIzaSyBmUowucx1T8o8hPLJjeXp9TO6vJ6tzmu4"; 
   const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${YOUTUBE_CHANNEL_ID}&order=date&type=video&key=${apiKey}`;
 
   try {
@@ -105,12 +105,19 @@ async function checkYouTube() {
               const reader = new FileReader();
               reader.onloadend = function() {
                 chrome.notifications.create(`YouTube_${latestVideoId}`, {
-                  type: 'basic',
-                  iconUrl: reader.result, // Utiliser la miniature comme icône
-                  title: 'Nouvelle vidéo YouTube d\'AymenZeR !',
-                  message: latestVideoTitle,
-                  buttons: [{ title: 'Regarder' }],
-                  requireInteraction: true
+                  type: 'image',
+                  iconUrl: chrome.runtime.getURL('icons/A_AE_neon_1.png'),
+                  imageUrl: thumbnailUrl,
+                  title: 'AymenZeR Notifier • maintenant',
+                  message: `📺 Nouvelle vidéo\n\n${latestVideoTitle}`,
+                  contextMessage: 'Special Events',
+                  priority: 2,
+                  buttons: [
+                    { title: '▶️ Regarder la vidéo' },
+                    { title: '🔕 Ne plus afficher' }
+                  ],
+                  requireInteraction: true,
+                  silent: false
                 }, (notificationId) => {
                   if (chrome.runtime.lastError) {
                     console.error('Erreur lors de la création de la notification YouTube:', chrome.runtime.lastError);
@@ -209,14 +216,19 @@ async function checkTwitch() {
 
     if (isLive && !wasLive) {
       chrome.notifications.create(`Twitch_${Date.now()}`, {
-        type: 'basic',
-        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
-        title: `${streamData.data[0].user_name} est en live !`,
-        message: `${streamData.data[0].title}\nJeu : ${streamData.data[0].game_name}\n${streamData.data[0].viewer_count} spectateurs`,
+        type: 'image',
+        iconUrl: chrome.runtime.getURL('icons/A_AE_neon_1.png'),
+        imageUrl: streamData.data[0].thumbnail_url.replace("{width}", "320").replace("{height}", "180"),
+        title: 'AymenZeR Notifier • maintenant',
+        message: `${streamData.data[0].title}\n\n🎮 ${streamData.data[0].game_name}\n👥 ${streamData.data[0].viewer_count.toLocaleString()} spectateurs`,
         contextMessage: 'Special Events',
         priority: 2,
-        buttons: [{ title: 'Regarder' }],
-        requireInteraction: true
+        buttons: [
+          { title: '▶️ Regarder le stream' },
+          { title: '🔕 Ne plus afficher' }
+        ],
+        requireInteraction: true,
+        silent: false
       });
       addLog(`Notification créée pour le stream de ${streamData.data[0].user_name}`);
     }
