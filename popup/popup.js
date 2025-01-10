@@ -13,6 +13,21 @@ const STORAGE_KEYS = {
   LAST_CHECK: 'lastCheck'
 };
 
+// Fonction pour rafraîchir les données
+async function refreshData() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'checkTwitchStatus' });
+    if (response && response.streamData) {
+      updateStreamInfo(response.streamData);
+    }
+  } catch (error) {
+    console.error('Erreur lors du rafraîchissement des données:', error);
+  }
+}
+
+// Définir l'intervalle de rafraîchissement (par exemple, toutes les 30 secondes)
+const REFRESH_INTERVAL = 500;
+
 document.addEventListener('DOMContentLoaded', async () => {
   // Animation de démarrage
   const splashScreen = document.querySelector('.splash-screen');
@@ -54,95 +69,64 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   function updateStreamInfo(streamData) {
+    if (!streamData) return;
+
     const viewerCount = document.getElementById('viewerCount');
     const viewerContainer = document.getElementById('viewerContainer');
     const gameName = document.getElementById('gameName');
     const streamPreview = document.getElementById('streamPreview');
     const uptime = document.getElementById('uptime');
     const streamStatus = document.getElementById('streamStatus');
-    const twitchLoginButton = document.getElementById('twitchLogin');
     
-    console.log('Mise à jour des informations du stream:', streamData);
+    // Vérifier si tous les éléments existent
+    if (!viewerCount || !viewerContainer || !gameName || !streamPreview || !uptime || !streamStatus) {
+      console.error('Certains éléments DOM sont manquants');
+      return;
+    }
 
-    // Vérifier si le stream est en ligne directement depuis les données
     const isStreamLive = streamData && streamData.data && streamData.data.length > 0;
-    console.log('État du stream:', isStreamLive ? 'En ligne' : 'Hors ligne');
 
-    // Vérifier l'état de connexion
-    chrome.storage.local.get(['twitchUserToken'], (result) => {
-      // Gestion du bouton de connexion
-      if (result.twitchUserToken) {
-        twitchLoginButton.textContent = '✓ Connecté';
-        twitchLoginButton.classList.add('connected');
-        twitchLoginButton.disabled = true;
-      } else {
-        twitchLoginButton.innerHTML = '<i class="fab fa-twitch"></i> Se connecter';
-        twitchLoginButton.classList.remove('connected');
-        twitchLoginButton.disabled = false;
-      }
-
-      // Mise à jour de l'interface en fonction du statut du stream
-      if (isStreamLive) {
-        const stream = streamData.data[0];
-        console.log('Informations du stream:', stream);
-
-        // Mettre à jour le statut
-        streamStatus.textContent = 'LIVE';
-        streamStatus.classList.remove('offline');
-        streamStatus.classList.add('live');
-        
-        // Afficher les informations du stream
-        viewerContainer.classList.remove('hidden');
-        viewerCount.textContent = stream.viewer_count.toLocaleString();
-        gameName.textContent = stream.game_name;
-        gameName.classList.remove('offline');
-        
-        // Mettre à jour la preview
-        const thumbnailUrl = stream.thumbnail_url
-          .replace('{width}', '320')
-          .replace('{height}', '180');
-        streamPreview.src = thumbnailUrl;
-        streamPreview.classList.remove('offline');
-        
-        // Calculer et afficher l'uptime
-        const startTime = new Date(stream.started_at);
-        const now = new Date();
-        const diff = now - startTime;
-        const hours = Math.floor(diff / 3600000);
-        const minutes = Math.floor((diff % 3600000) / 60000);
-        uptime.textContent = `Uptime: ${hours}h${minutes.toString().padStart(2, '0')}`;
-        uptime.classList.remove('offline');
-
-        // Mettre à jour le stockage local avec le nouvel état
-        chrome.storage.local.set({ 
-          isLive: true,
-          streamData: streamData
-        });
-      } else {
-        console.log('Stream hors ligne - Mise à jour de l\'interface');
-        // État offline
-        streamStatus.textContent = 'OFFLINE';
-        streamStatus.classList.remove('live');
-        streamStatus.classList.add('offline');
-        
-        // Cacher les éléments
-        viewerContainer.classList.add('hidden');
-        gameName.classList.add('offline');
-        streamPreview.classList.add('offline');
-        uptime.classList.add('offline');
-        
-        // Nettoyer les contenus
-        gameName.textContent = '';
-        streamPreview.src = '';
-        uptime.textContent = '';
-
-        // Mettre à jour le stockage local avec le nouvel état
-        chrome.storage.local.set({ 
-          isLive: false,
-          streamData: null
-        });
-      }
-    });
+    if (isStreamLive) {
+      const stream = streamData.data[0];
+      
+      // Mettre à jour le statut
+      streamStatus.textContent = 'LIVE';
+      streamStatus.classList.remove('offline');
+      streamStatus.classList.add('live');
+      
+      // Mettre à jour les informations du stream
+      viewerContainer.classList.remove('hidden');
+      viewerCount.textContent = stream.viewer_count.toLocaleString();
+      gameName.textContent = stream.game_name;
+      gameName.classList.remove('offline');
+      
+      // Mettre à jour la preview
+      const thumbnailUrl = stream.thumbnail_url
+        .replace('{width}', '320')
+        .replace('{height}', '180');
+      streamPreview.src = thumbnailUrl;
+      streamPreview.classList.remove('offline');
+      
+      // Calculer et afficher l'uptime
+      const startTime = new Date(stream.started_at);
+      const now = new Date();
+      const diff = now - startTime;
+      const hours = Math.floor(diff / 3600000);
+      const minutes = Math.floor((diff % 3600000) / 60000);
+      uptime.textContent = `Uptime: ${hours}h${minutes.toString().padStart(2, '0')}`;
+      uptime.classList.remove('offline');
+    } else {
+      // État offline
+      streamStatus.textContent = 'OFFLINE';
+      streamStatus.classList.remove('live');
+      streamStatus.classList.add('offline');
+      
+      // Cacher les éléments
+      viewerContainer.classList.add('hidden');
+      gameName.classList.add('offline');
+      streamPreview.classList.add('offline');
+      uptime.classList.add('offline');
+    }
   }
 
   function updateStatus() {
@@ -202,6 +186,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (error) {
       console.error('Erreur de connexion:', error);
       alert('Une erreur est survenue lors de la connexion.');
+    }
+  });
+
+  // Mettre en place le rafraîchissement automatique
+  setInterval(refreshData, REFRESH_INTERVAL);
+
+  // Écouter les changements dans le stockage
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local') {
+      for (let key in changes) {
+        if (key === STORAGE_KEYS.TWITCH_DATA || key === STORAGE_KEYS.IS_LIVE) {
+          const newData = changes[key].newValue;
+          if (key === STORAGE_KEYS.TWITCH_DATA) {
+            updateStreamInfo(newData);
+          }
+        }
+      }
     }
   });
 });
