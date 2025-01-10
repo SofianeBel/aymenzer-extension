@@ -29,9 +29,9 @@
   "oauth2": {
     "client_id": "8xiery290o0ioczddjogf337p1etp7",
     "scopes": [
+      "user:read:email",
       "user:read:subscriptions"
-    ],
-    "redirect_url": "https://${chrome.runtime.id}.chromiumapp.org/oauth2"
+    ]
   },
   "web_accessible_resources": [{
     "resources": ["icons/*"],

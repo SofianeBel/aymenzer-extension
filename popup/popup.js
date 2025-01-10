@@ -187,14 +187,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   twitchLoginButton.addEventListener('click', async () => {
     try {
       const response = await chrome.runtime.sendMessage({ action: 'authenticateTwitch' });
-      if (response && response.success) {
-        console.log('Connexion Twitch réussie');
-        await checkInitialStatus(); // Rafraîchir les informations après connexion
+      if (response.success) {
+        console.log('Connexion Twitch réussie', response);
+        twitchLoginButton.textContent = '✓ Connecté';
+        twitchLoginButton.classList.add('connected');
+        twitchLoginButton.disabled = true;
+        
+        // Rafraîchir les informations après connexion
+        await checkInitialStatus();
       } else {
-        console.error('Échec de la connexion:', response?.error);
+        console.error('Échec de la connexion:', response.error);
+        alert(`Échec de la connexion : ${response.error}`);
       }
     } catch (error) {
       console.error('Erreur de connexion:', error);
+      alert('Une erreur est survenue lors de la connexion.');
     }
   });
 });

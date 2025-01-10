@@ -1,17 +1,22 @@
 body {
-  width: 400px; /* au lieu de 300px */
-  background-color: #18181b;
+  width: 400px;
+  background-color: rgba(24, 24, 27, 0.95);
   color: #efeff1;
   font-family: 'Inter', sans-serif;
   margin: 0;
   padding: 0;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
 }
 
 .stream-card {
-  background-color: #0e0e10;
+  background-color: rgba(14, 14, 16, 0.8);
   border-radius: 10px;
   padding: 15px;
   margin: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .stream-header {

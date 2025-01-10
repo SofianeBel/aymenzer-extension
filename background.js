@@ -465,8 +465,66 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return true;
 
+    case 'authenticateTwitch':
+      authenticateTwitch().then(sendResponse);
+      return true;
+    
     default:
-      sendResponse({ success: false, error: 'Action inconnue.' });
+      console.error('Action inconnue:', request.action);
+      sendResponse({ success: false, error: 'Action inconnue' });
       return false;
   }
 });
+
+async function authenticateTwitch() {
+  const clientId = TWITCH_CLIENT_ID;
+  const redirectUri = chrome.identity.getRedirectURL('oauth2');
+  const scope = 'user:read:email user:read:subscriptions';
+  const state = generateRandomState(16);
+
+  console.log('URL de redirection:', redirectUri); // Pour vérification
+
+  const authUrl = `https://id.twitch.tv/oauth2/authorize?` +
+    `client_id=${clientId}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `response_type=token&` +
+    `scope=${encodeURIComponent(scope)}&` +
+    `state=${state}&` +
+    `force_verify=true`;
+
+  try {
+    const responseUrl = await chrome.identity.launchWebAuthFlow({
+      url: authUrl,
+      interactive: true
+    });
+
+    console.log('URL de réponse:', responseUrl);
+
+    const url = new URL(responseUrl);
+    const fragment = url.hash.substring(1);
+    const params = new URLSearchParams(fragment);
+
+    const accessToken = params.get('access_token');
+    if (!accessToken) {
+      throw new Error('Pas de token d\'accès dans la réponse');
+    }
+
+    // Sauvegarder le token
+    await chrome.storage.local.set({
+      twitchUserToken: accessToken,
+      twitchTokenTimestamp: Date.now()
+    });
+
+    return { success: true, token: accessToken };
+  } catch (error) {
+    console.error('Erreur d\'authentification:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+function generateRandomState(length) {
+  const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(length)))
+    .map(x => charset[x % charset.length])
+    .join('');
+}
