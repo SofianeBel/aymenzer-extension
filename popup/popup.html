@@ -1,8 +1,11 @@
+<!-- Start of Selection -->
 <!DOCTYPE html>
-<html>
+<html lang="fr"> <!-- Ajout de l'attribut lang pour spécifier la langue du document -->
   <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- Ajout de la balise viewport pour une meilleure réactivité -->
     <title>AymenZeR Notifier</title>
+<!-- End of Selection -->
     <link rel="stylesheet" href="../styles/popup.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   </head>
@@ -26,24 +29,25 @@
         
         <div class="game-name" id="gameName">Chargement...</div>
         <img id="streamPreview" class="stream-preview" src="" alt="Stream Preview">
-        
         <div class="action-buttons">
-          <a href="https://www.twitch.tv/AymenZeR" target="_blank" class="action-button twitch-button">
+          <a href="https://www.twitch.tv/AymenZeR" target="_blank" rel="noopener" class="action-button twitch-button">
             Twitch.tv/AymenZeR
           </a>
-          <button id="twitchLogin" class="action-button login-button">
+          <button id="twitchLogin" class="action-button login-button" aria-label="Se connecter à Twitch">
             <i class="fab fa-twitch"></i> Se connecter
+          </button>
+          <button id="settingsBtn" class="action-button settings-button">
+            <i class="fas fa-cog"></i> Paramètres
           </button>
         </div>
         
         <div class="uptime" id="uptime">Uptime: 0h00</div>
-        
+        <div id="nextPaymentDate" class="next-payment-date hidden"></div>
         <div class="social-links">
-          <a href="https://twitter.com/AymenZeRRR" target="_blank" class="social-link"><i class="fab fa-twitter"></i></a>
-          <a href="https://www.youtube.com/@AymenZeR/featured" target="_blank" class="social-link"><i class="fab fa-youtube"></i></a>
-          <a href="https://www.tiktok.com/@aymenkoreaplayer" target="_blank" class="social-link"><i class="fab fa-tiktok"></i></a>
+          <a href="https://twitter.com/AymenZeRRR" target="_blank" rel="noopener" class="social-link"><i class="fab fa-twitter"></i></a>
+          <a href="https://www.youtube.com/@AymenZeR/featured" target="_blank" rel="noopener" class="social-link"><i class="fab fa-youtube"></i></a>
+          <a href="https://www.tiktok.com/@aymenkoreaplayer" target="_blank" rel="noopener" class="social-link"><i class="fab fa-tiktok"></i></a>
         </div>
-        
         <div class="dev-menu-link">
           <a href="dev.html" target="_blank" class="action-button dev-button">
             <i class="fas fa-tools"></i> Menu Dev
