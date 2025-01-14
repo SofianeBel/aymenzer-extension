@@ -1,156 +1,157 @@
-// Supprimer cette ligne car elle efface les données persistées
-// chrome.storage.local.clear();
-
-
-// Ajouter la définition des clés de stockage
+// ===== Constantes et Configuration =====
 const STORAGE_KEYS = {
-  LAST_YOUTUBE_VIDEO_ID: 'lastYouTubeVideoId',
-  IS_LIVE: 'isLive',
-  LAST_TIKTOK_VIDEO_URL: 'lastTikTokVideoUrl',
-  YOUTUBE_DATA: 'youtubeData',
-  TWITCH_DATA: 'twitchData',
-  TIKTOK_DATA: 'tiktokData',
-  LAST_CHECK: 'lastCheck'
+  IS_LIVE: "isLive",
+  TWITCH_DATA: "twitchData",
+  LAST_CHECK: "lastCheck",
 };
 
-// Fonction pour rafraîchir les données
+// ===== Fonction de mise à jour des informations du stream =====
+function updateStreamInfo(streamData) {
+  if (!streamData) return;
+
+  const viewerCount = document.getElementById("viewerCount");
+  const viewerContainer = document.getElementById("viewerContainer");
+  const gameName = document.getElementById("gameName");
+  const streamPreview = document.getElementById("streamPreview");
+  const uptime = document.getElementById("uptime");
+  const streamStatus = document.getElementById("streamStatus");
+
+  // Vérifier si tous les éléments existent
+  if (
+    !viewerCount ||
+    !viewerContainer ||
+    !gameName ||
+    !streamPreview ||
+    !uptime ||
+    !streamStatus
+  ) {
+    console.error("Certains éléments DOM sont manquants");
+    return;
+  }
+
+  const isStreamLive =
+    streamData && streamData.data && streamData.data.length > 0;
+
+  if (isStreamLive) {
+    const stream = streamData.data[0];
+
+    // Mettre à jour le statut
+    streamStatus.textContent = "LIVE";
+    streamStatus.classList.remove("offline");
+    streamStatus.classList.add("live");
+
+    // Mettre à jour les informations du stream
+    viewerContainer.classList.remove("hidden");
+    viewerCount.textContent = stream.viewer_count.toLocaleString();
+    gameName.textContent = stream.game_name;
+    gameName.classList.remove("offline");
+
+    // Mettre à jour la preview
+    const thumbnailUrl = stream.thumbnail_url
+      .replace("{width}", "320")
+      .replace("{height}", "180");
+    streamPreview.src = thumbnailUrl;
+    streamPreview.classList.remove("offline");
+
+    // Calculer et afficher l'uptime
+    const startTime = new Date(stream.started_at);
+    const now = new Date();
+    const diff = now - startTime;
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    uptime.textContent = `Uptime: ${hours}h${minutes
+      .toString()
+      .padStart(2, "0")}`;
+    uptime.classList.remove("offline");
+  } else {
+    // État offline
+    streamStatus.textContent = "OFFLINE";
+    streamStatus.classList.remove("live");
+    streamStatus.classList.add("offline");
+
+    // Cacher les éléments
+    viewerContainer.classList.add("hidden");
+    gameName.classList.add("offline");
+    streamPreview.classList.add("offline");
+    uptime.classList.add("offline");
+  }
+}
+
+// ===== Fonction de rafraîchissement des données =====
 async function refreshData() {
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'checkTwitchStatus' });
+    const response = await chrome.runtime.sendMessage({
+      action: "checkTwitchStatus",
+    });
     if (response && response.streamData) {
       updateStreamInfo(response.streamData);
     }
   } catch (error) {
-    console.error('Erreur lors du rafraîchissement des données:', error);
+    console.error("Erreur lors du rafraîchissement des données:", error);
   }
 }
 
-// Définir l'intervalle de rafraîchissement (par exemple, toutes les 30 secondes)
+// ===== Configuration de l'intervalle de rafraîchissement =====
 const REFRESH_INTERVAL = 500;
 
-document.addEventListener('DOMContentLoaded', async () => {
-  // Animation de démarrage
-  const splashScreen = document.querySelector('.splash-screen');
-  const neonLogo = document.querySelector('.neon-logo');
-  const mainContent = document.querySelector('.main-content');
-  const electricExplosion = document.querySelector('.electric-explosion');
+// ===== Gestionnaire principal du chargement de la page =====
+document.addEventListener("DOMContentLoaded", async () => {
+  // ===== Animation de démarrage =====
+  const splashScreen = document.querySelector(".splash-screen");
+  const neonLogo = document.querySelector(".neon-logo");
+  const mainContent = document.querySelector(".main-content");
+  const electricExplosion = document.querySelector(".electric-explosion");
 
-  // Démarrer l'animation du logo néon
+  // Animation du logo néon
   setTimeout(() => {
-    // Créer l'explosion électrique
-    electricExplosion.style.animation = 'electricExplosion 0.5s ease-out';
-    
-    // Après l'explosion, cacher le splash screen et montrer le contenu principal
+    electricExplosion.style.animation = "electricExplosion 0.5s ease-out";
     setTimeout(() => {
-      splashScreen.style.display = 'none';
-      mainContent.classList.add('visible');
+      splashScreen.style.display = "none";
+      mainContent.classList.add("visible");
     }, 500);
   }, 1000);
 
-  const statusDiv = document.getElementById('status');
-
-  // Ajouter un écouteur pour les changements de stockage
+  // ===== Écouteur des changements de stockage =====
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local') {
-      if (changes.streamData || changes.isLive) {
-        const newStreamData = changes.streamData ? changes.streamData.newValue : null;
-        const isLive = changes.isLive ? changes.isLive.newValue : null;
-        
-        if (newStreamData) {
-          updateStreamInfo(newStreamData);
-        } else {
-          // Si on n'a que isLive qui change, récupérer les données existantes
-          chrome.storage.local.get(['streamData'], (result) => {
-            updateStreamInfo(result.streamData || { data: [] });
-          });
-        }
+    if (namespace === "local") {
+      console.log("Changements dans le stockage local:", changes);
+
+      if (changes[STORAGE_KEYS.TWITCH_DATA]) {
+        const newStreamData = changes[STORAGE_KEYS.TWITCH_DATA].newValue;
+        console.log("Nouvelles données de stream:", newStreamData);
+        updateStreamInfo(newStreamData);
+      }
+
+      if (changes[STORAGE_KEYS.IS_LIVE]) {
+        const isLive = changes[STORAGE_KEYS.IS_LIVE].newValue;
+        console.log("Nouvel état live:", isLive);
       }
     }
   });
 
-  function updateStreamInfo(streamData) {
-    if (!streamData) return;
-
-    const viewerCount = document.getElementById('viewerCount');
-    const viewerContainer = document.getElementById('viewerContainer');
-    const gameName = document.getElementById('gameName');
-    const streamPreview = document.getElementById('streamPreview');
-    const uptime = document.getElementById('uptime');
-    const streamStatus = document.getElementById('streamStatus');
-    
-    // Vérifier si tous les éléments existent
-    if (!viewerCount || !viewerContainer || !gameName || !streamPreview || !uptime || !streamStatus) {
-      console.error('Certains éléments DOM sont manquants');
-      return;
-    }
-
-    const isStreamLive = streamData && streamData.data && streamData.data.length > 0;
-
-    if (isStreamLive) {
-      const stream = streamData.data[0];
-      
-      // Mettre à jour le statut
-      streamStatus.textContent = 'LIVE';
-      streamStatus.classList.remove('offline');
-      streamStatus.classList.add('live');
-      
-      // Mettre à jour les informations du stream
-      viewerContainer.classList.remove('hidden');
-      viewerCount.textContent = stream.viewer_count.toLocaleString();
-      gameName.textContent = stream.game_name;
-      gameName.classList.remove('offline');
-      
-      // Mettre à jour la preview
-      const thumbnailUrl = stream.thumbnail_url
-        .replace('{width}', '320')
-        .replace('{height}', '180');
-      streamPreview.src = thumbnailUrl;
-      streamPreview.classList.remove('offline');
-      
-      // Calculer et afficher l'uptime
-      const startTime = new Date(stream.started_at);
-      const now = new Date();
-      const diff = now - startTime;
-      const hours = Math.floor(diff / 3600000);
-      const minutes = Math.floor((diff % 3600000) / 60000);
-      uptime.textContent = `Uptime: ${hours}h${minutes.toString().padStart(2, '0')}`;
-      uptime.classList.remove('offline');
-    } else {
-      // État offline
-      streamStatus.textContent = 'OFFLINE';
-      streamStatus.classList.remove('live');
-      streamStatus.classList.add('offline');
-      
-      // Cacher les éléments
-      viewerContainer.classList.add('hidden');
-      gameName.classList.add('offline');
-      streamPreview.classList.add('offline');
-      uptime.classList.add('offline');
-    }
-  }
-
+  // ===== Fonction de mise à jour du statut =====
   function updateStatus() {
-    chrome.storage.local.get([STORAGE_KEYS.TWITCH_DATA, STORAGE_KEYS.IS_LIVE], (result) => {
-      console.log('Données récupérées du stockage:', result);
-      
-      // Utiliser les données Twitch stockées
-      if (result[STORAGE_KEYS.TWITCH_DATA]) {
-        updateStreamInfo(result[STORAGE_KEYS.TWITCH_DATA]);
-      } else {
-        updateStreamInfo({ data: [] });
+    chrome.storage.local.get(
+      [STORAGE_KEYS.TWITCH_DATA, STORAGE_KEYS.IS_LIVE],
+      (result) => {
+        console.log("Données récupérées du stockage:", result);
+
+        // Utiliser les données Twitch stockées
+        if (result[STORAGE_KEYS.TWITCH_DATA]) {
+          updateStreamInfo(result[STORAGE_KEYS.TWITCH_DATA]);
+        } else {
+          updateStreamInfo({ data: [] });
+        }
       }
-    });
+    );
   }
 
-  // Initialisation du statut lors du chargement de la popup
-  updateStatus();
-
-  const twitchLoginButton = document.getElementById('twitchLogin');
-  
-  // Fonction pour vérifier le statut initial
+  // ===== Fonction de vérification du statut initial =====
   async function checkInitialStatus() {
     try {
-      const response = await chrome.runtime.sendMessage({ action: 'checkTwitchStatus' });
+      const response = await chrome.runtime.sendMessage({
+        action: "checkTwitchStatus",
+      });
       if (response && response.streamData) {
         updateStreamInfo(response.streamData);
       } else {
@@ -160,41 +161,45 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       }
     } catch (error) {
-      console.error('Erreur lors de la vérification initiale:', error);
+      console.error("Erreur lors de la vérification initiale:", error);
     }
   }
 
-  // Vérifier le statut au chargement
+  // ===== Initialisation et configuration =====
+  updateStatus();
   await checkInitialStatus();
 
-  // Gestionnaire de clic pour le bouton de connexion
-  twitchLoginButton.addEventListener('click', async () => {
+  // ===== Gestion du bouton de connexion Twitch =====
+  const twitchLoginButton = document.getElementById("twitchLogin");
+  twitchLoginButton.addEventListener("click", async () => {
     try {
-      const response = await chrome.runtime.sendMessage({ action: 'authenticateTwitch' });
+      const response = await chrome.runtime.sendMessage({
+        action: "authenticateTwitch",
+      });
       if (response.success) {
-        console.log('Connexion Twitch réussie', response);
-        twitchLoginButton.textContent = '✓ Connecté';
-        twitchLoginButton.classList.add('connected');
+        console.log("Connexion Twitch réussie", response);
+        twitchLoginButton.textContent = "✓ Connecté";
+        twitchLoginButton.classList.add("connected");
         twitchLoginButton.disabled = true;
-        
+
         // Rafraîchir les informations après connexion
         await checkInitialStatus();
       } else {
-        console.error('Échec de la connexion:', response.error);
+        console.error("Échec de la connexion:", response.error);
         alert(`Échec de la connexion : ${response.error}`);
       }
     } catch (error) {
-      console.error('Erreur de connexion:', error);
-      alert('Une erreur est survenue lors de la connexion.');
+      console.error("Erreur de connexion:", error);
+      alert("Une erreur est survenue lors de la connexion.");
     }
   });
 
-  // Mettre en place le rafraîchissement automatique
+  // ===== Configuration du rafraîchissement automatique =====
   setInterval(refreshData, REFRESH_INTERVAL);
 
-  // Écouter les changements dans le stockage
+  // ===== Écouteur des changements dans le stockage =====
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local') {
+    if (namespace === "local") {
       for (let key in changes) {
         if (key === STORAGE_KEYS.TWITCH_DATA || key === STORAGE_KEYS.IS_LIVE) {
           const newData = changes[key].newValue;

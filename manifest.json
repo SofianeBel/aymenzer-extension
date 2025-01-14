@@ -28,13 +28,12 @@
   "devtools_page": "popup/dev.html",
   "oauth2": {
     "client_id": "8xiery290o0ioczddjogf337p1etp7",
-    "scopes": [
-      "user:read:email",
-      "user:read:subscriptions"
-    ]
+    "scopes": ["user:read:email", "user:read:subscriptions"]
   },
-  "web_accessible_resources": [{
-    "resources": ["icons/*"],
-    "matches": ["<all_urls>"]
-  }]
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
