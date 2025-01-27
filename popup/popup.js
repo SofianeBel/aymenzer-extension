@@ -36,7 +36,7 @@ function updateStreamInfo(streamData) {
     const stream = streamData.data[0];
 
     // Mettre à jour le statut
-    streamStatus.textContent = "LIVE";
+    streamStatus.textContent = "🔴 EN DIRECT";
     streamStatus.classList.remove("offline");
     streamStatus.classList.add("live");
 
@@ -65,7 +65,7 @@ function updateStreamInfo(streamData) {
     uptime.classList.remove("offline");
   } else {
     // État offline
-    streamStatus.textContent = "OFFLINE";
+    streamStatus.textContent = "HORS LIGNE";
     streamStatus.classList.remove("live");
     streamStatus.classList.add("offline");
 
@@ -209,5 +209,63 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
       }
     }
+  });
+
+  const statusDiv = document.getElementById('streamStatus');
+  const joinButton = document.getElementById('joinStream');
+  const streamDetailsDiv = document.getElementById('stream-details');
+
+  function updatePopup(isLive, streamData) {
+    if (isLive && streamData) {
+      const startTime = new Date(streamData.started_at);
+      const currentTime = new Date();
+      const uptimeDiff = currentTime - startTime;
+      const hours = Math.floor(uptimeDiff / (1000 * 60 * 60));
+      const minutes = Math.floor((uptimeDiff % (1000 * 60 * 60)) / (1000 * 60));
+
+      statusDiv.textContent = '🔴 EN DIRECT';
+      streamDetailsDiv.innerHTML = `
+        <div style="position: relative;">
+          <img src="${streamData.thumbnail_url.replace('{width}', '320').replace('{height}', '180')}" alt="Stream Thumbnail">
+          <span class="uptime" style="position: absolute; top: 8px; left: 8px;">
+            ${hours}h ${minutes}m
+          </span>
+        </div>
+        <p class="title">${streamData.title}</p>
+        <div class="game-info">
+          <img src="${streamData.gameImageUrl}" alt="${streamData.game_name}" class="game-image">
+          <span>${streamData.game_name}</span>
+        </div>
+        <p class="viewer-count">👥 ${streamData.viewer_count.toLocaleString()} spectateurs</p>
+      `;
+      joinButton.style.display = 'block';
+    } else {
+      statusDiv.textContent = 'HORS LIGNE';
+      streamDetailsDiv.innerHTML = '';
+      joinButton.style.display = 'none';
+    }
+  }
+
+  // Get initial status from background script
+  chrome.runtime.sendMessage({ action: "checkTwitchStatus" }, function(response) {
+    if (response && response.isLive) {
+      updatePopup(response.isLive, response.streamData);
+    } else {
+      updatePopup(false, null);
+    }
+  });
+
+  // Listen for status updates from the background script
+  chrome.runtime.onMessage.addListener(
+    function(request, sender, sendResponse) {
+      if (request.message === "update_status") {
+        updatePopup(request.isLive, request.streamData);
+      }
+    }
+  );
+
+  joinButton.addEventListener('click', function() {
+    chrome.tabs.create({ url: `https://www.twitch.tv/AymenZeR` });
+    console.log('Opening Twitch stream...');
   });
 });
