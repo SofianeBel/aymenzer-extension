@@ -171,28 +171,32 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ===== Gestion du bouton de connexion Twitch =====
   const twitchLoginButton = document.getElementById("twitchLogin");
-  twitchLoginButton.addEventListener("click", async () => {
-    try {
-      const response = await chrome.runtime.sendMessage({
-        action: "authenticateTwitch",
-      });
-      if (response.success) {
-        console.log("Connexion Twitch réussie", response);
-        twitchLoginButton.textContent = "✓ Connecté";
-        twitchLoginButton.classList.add("connected");
-        twitchLoginButton.disabled = true;
+  if (twitchLoginButton) {
+    twitchLoginButton.addEventListener("click", async () => {
+      try {
+        const response = await chrome.runtime.sendMessage({
+          action: "authenticateTwitch",
+        });
+        if (response.success) {
+          console.log("Connexion Twitch réussie", response);
+          twitchLoginButton.textContent = "✓ Connecté";
+          twitchLoginButton.classList.add("connected");
+          twitchLoginButton.disabled = true;
 
-        // Rafraîchir les informations après connexion
-        await checkInitialStatus();
-      } else {
-        console.error("Échec de la connexion:", response.error);
-        alert(`Échec de la connexion : ${response.error}`);
+          // Rafraîchir les informations après connexion
+          await checkInitialStatus();
+        } else {
+          console.error("Échec de la connexion:", response.error);
+          alert(`Échec de la connexion : ${response.error}`);
+        }
+      } catch (error) {
+        console.error("Erreur de connexion:", error);
+        alert("Une erreur est survenue lors de la connexion.");
       }
-    } catch (error) {
-      console.error("Erreur de connexion:", error);
-      alert("Une erreur est survenue lors de la connexion.");
-    }
-  });
+    });
+  } else {
+    console.warn("Bouton de connexion Twitch introuvable.");
+  }
 
   // ===== Configuration du rafraîchissement automatique =====
   setInterval(refreshData, REFRESH_INTERVAL);
@@ -224,24 +228,34 @@ document.addEventListener("DOMContentLoaded", async () => {
       const minutes = Math.floor((uptimeDiff % (1000 * 60 * 60)) / (1000 * 60));
 
       statusDiv.textContent = '🔴 EN DIRECT';
-      streamDetailsDiv.innerHTML = `
-        <div style="position: relative;">
-          <img src="${streamData.thumbnail_url.replace('{width}', '320').replace('{height}', '180')}" alt="Stream Thumbnail">
-          <span class="uptime" style="position: absolute; top: 8px; left: 8px;">
-            ${hours}h ${minutes}m
-          </span>
-        </div>
-        <p class="title">${streamData.title}</p>
-        <div class="game-info">
-          <img src="${streamData.gameImageUrl}" alt="${streamData.game_name}" class="game-image">
-          <span>${streamData.game_name}</span>
-        </div>
-        <p class="viewer-count">👥 ${streamData.viewer_count.toLocaleString()} spectateurs</p>
-      `;
+      
+      if (streamDetailsDiv) {
+        streamDetailsDiv.innerHTML = `
+          <div style="position: relative;">
+            <img src="${streamData.thumbnail_url.replace('{width}', '320').replace('{height}', '180')}" alt="Stream Thumbnail">
+            <span class="uptime" style="position: absolute; top: 8px; left: 8px;">
+              ${hours}h ${minutes}m
+            </span>
+          </div>
+          <p class="title">${streamData.title}</p>
+          <div class="game-info">
+            <img src="${streamData.gameImageUrl}" alt="${streamData.game_name}" class="game-image">
+            <span>${streamData.game_name}</span>
+          </div>
+          <p class="viewer-count">👥 ${streamData.viewer_count.toLocaleString()} spectateurs</p>
+        `;
+      } else {
+        console.error("Elément avec l'ID 'stream-details' introuvable dans le DOM.");
+      }
+      
       joinButton.style.display = 'block';
     } else {
       statusDiv.textContent = 'HORS LIGNE';
-      streamDetailsDiv.innerHTML = '';
+      
+      if (streamDetailsDiv) {
+        streamDetailsDiv.innerHTML = '';
+      }
+      
       joinButton.style.display = 'none';
     }
   }
@@ -264,8 +278,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   );
 
-  joinButton.addEventListener('click', function() {
-    chrome.tabs.create({ url: `https://www.twitch.tv/AymenZeR` });
-    console.log('Opening Twitch stream...');
-  });
+  // ===== Gestion du bouton Rejoindre le Stream =====
+  if (joinButton) {
+    joinButton.addEventListener('click', function() {
+      chrome.tabs.create({ url: `https://www.twitch.tv/AymenZeR` });
+      console.log('Opening Twitch stream...');
+    });
+  } else {
+    console.warn("Bouton Rejoindre le Stream introuvable.");
+  }
 });
