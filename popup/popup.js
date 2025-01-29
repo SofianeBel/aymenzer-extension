@@ -4,7 +4,136 @@ const STORAGE_KEYS = {
   TWITCH_DATA: "twitchData",
   LAST_CHECK: "lastCheck",
   SUB_INFO: "subInfo",
+  TWITCH_CONNECTION: "twitchConnection"  // Nouvelle clé pour l'état de connexion
 };
+
+// ===== Fonction de mise à jour de l'interface utilisateur =====
+function updateUIState(connectionData) {
+  const connectBtn = document.getElementById('twitch-connect-btn');
+  const disconnectBtn = document.getElementById('twitch-disconnect-btn');
+  const subInfoDiv = document.getElementById('subInfo');
+
+  if (!connectBtn || !disconnectBtn || !subInfoDiv) {
+    console.error("Éléments UI manquants");
+    return;
+  }
+
+  // Vérifier si connectionData est défini et valide
+  if (!connectionData || typeof connectionData !== 'object') {
+    // Premier lancement ou état déconnecté, pas besoin de log d'avertissement
+    connectBtn.style.display = 'block';
+    disconnectBtn.style.display = 'none';
+    connectBtn.innerHTML = '<i class="fab fa-twitch"></i> Se connecter';
+    
+    updateSubscriptionInfo({
+      isAuthenticated: false,
+      isSubscribed: false,
+      message: "Non connecté"
+    });
+    return;
+  }
+
+  // Vérifier si l'utilisateur est connecté
+  const isConnected = Boolean(connectionData.isConnected);
+
+  if (isConnected) {
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = 'block';
+    disconnectBtn.textContent = `✓ ${connectionData.username || 'Connecté'}`;
+    
+    // Mettre à jour les informations d'abonnement
+    if (connectionData.subInfo) {
+      updateSubscriptionInfo(connectionData.subInfo);
+    } else {
+      // Si pas d'info d'abonnement mais connecté
+      updateSubscriptionInfo({
+        isAuthenticated: true,
+        isSubscribed: false,
+        message: "Statut d'abonnement inconnu"
+      });
+    }
+  } else {
+    connectBtn.style.display = 'block';
+    connectBtn.innerHTML = '<i class="fab fa-twitch"></i> Se connecter';
+    disconnectBtn.style.display = 'none';
+    
+    // Réinitialiser les informations d'abonnement
+    updateSubscriptionInfo({
+      isAuthenticated: false,
+      isSubscribed: false,
+      message: "Non connecté"
+    });
+  }
+}
+
+// ===== Fonction de mise à jour des informations d'abonnement =====
+function updateSubscriptionInfo(subData) {
+  const subInfoElement = document.getElementById('subInfo');
+  const nextPaymentDateElement = document.getElementById('nextPaymentDate');
+
+  if (!subInfoElement) {
+    console.error("Élément subInfo non trouvé");
+    return;
+  }
+
+  // Vérifier si l'utilisateur est authentifié
+  if (!subData.isAuthenticated) {
+    subInfoElement.innerHTML = `
+      <p class="sub-status not-authenticated">
+        Non connecté à Twitch
+      </p>
+    `;
+    subInfoElement.classList.remove('hidden');
+    
+    // Cacher l'élément de date de prochain paiement
+    if (nextPaymentDateElement) {
+      nextPaymentDateElement.classList.add('hidden');
+    }
+    
+    return;
+  }
+
+  // Vérifier si l'utilisateur est abonné
+  if (!subData.isSubscribed) {
+    subInfoElement.innerHTML = `
+      <p class="sub-status not-subscribed">
+        Pas abonné à AymenZeR
+      </p>
+    `;
+    subInfoElement.classList.remove('hidden');
+    
+    // Cacher l'élément de date de prochain paiement
+    if (nextPaymentDateElement) {
+      nextPaymentDateElement.classList.add('hidden');
+    }
+    
+    return;
+  }
+
+  // Préparer le message du tier
+  let tierMessage = `Abonné à ${subData.broadcaster_name} - ${subData.tierText}`;
+  
+  // Ajouter des informations sur le gifter si applicable
+  if (subData.gifter) {
+    tierMessage += ` (offert par ${subData.gifter.name})`;
+  }
+
+  // Mettre à jour l'élément d'information d'abonnement
+  subInfoElement.innerHTML = `
+    <p class="sub-status subscribed">
+      ${tierMessage}
+    </p>
+    ${subData.plan_name ? `<p class="sub-plan">${subData.plan_name}</p>` : ''}
+  `;
+
+  // Cacher l'élément de date de prochain paiement
+  if (nextPaymentDateElement) {
+    nextPaymentDateElement.classList.add('hidden');
+  }
+
+  // Rendre l'élément visible
+  subInfoElement.classList.remove('hidden');
+}
 
 // ===== Fonction de mise à jour des informations du stream =====
 function updateStreamInfo(streamData) {
@@ -115,6 +244,50 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ===== Initialiser les éléments d'abonnement =====
   initializeSubscriptionElements();
 
+  // ===== Initialisation de l'interface au premier lancement =====
+  const initialConnectBtn = document.getElementById('twitch-connect-btn');
+  const initialDisconnectBtn = document.getElementById('twitch-disconnect-btn');
+  const initialSubInfoDiv = document.getElementById('subInfo');
+
+  if (initialConnectBtn && initialDisconnectBtn && initialSubInfoDiv) {
+    // État par défaut au premier lancement
+    initialConnectBtn.style.display = 'block';
+    initialDisconnectBtn.style.display = 'none';
+    initialConnectBtn.innerHTML = '<i class="fab fa-twitch"></i> Se connecter';
+    
+    // Initialiser l'état de l'abonnement
+    updateSubscriptionInfo({
+      isAuthenticated: false,
+      isSubscribed: false,
+      message: "Non connecté"
+    });
+  }
+
+  // ===== Charger l'état depuis le stockage =====
+  try {
+    const storedData = await chrome.storage.local.get([
+      'twitchUserToken',
+      'twitchConnectionStatus',
+      'twitchUsername',
+      STORAGE_KEYS.TWITCH_CONNECTION
+    ]);
+
+    // Si nous avons des données de connexion stockées, les utiliser
+    if (storedData[STORAGE_KEYS.TWITCH_CONNECTION] && 
+        storedData.twitchUserToken && 
+        storedData.twitchConnectionStatus) {
+      console.log("Données de connexion trouvées, restauration de l'état");
+      updateUIState(storedData[STORAGE_KEYS.TWITCH_CONNECTION]);
+      
+      // Vérifier si le token est toujours valide
+      await checkTwitchConnectionStatus();
+    } else {
+      console.log("Premier lancement ou non connecté");
+    }
+  } catch (error) {
+    console.error("Erreur lors du chargement de l'état initial:", error);
+  }
+
   // ===== Écouteur des changements de stockage =====
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === "local") {
@@ -129,6 +302,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (changes[STORAGE_KEYS.IS_LIVE]) {
         const isLive = changes[STORAGE_KEYS.IS_LIVE].newValue;
         console.log("Nouvel état live:", isLive);
+      }
+
+      if (changes[STORAGE_KEYS.TWITCH_CONNECTION]) {
+        const connectionData = changes[STORAGE_KEYS.TWITCH_CONNECTION].newValue;
+        updateUIState(connectionData);
       }
     }
   });
@@ -153,6 +331,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ===== Fonction de vérification du statut initial =====
   async function checkInitialStatus() {
     try {
+      // Charger d'abord l'état de connexion depuis le stockage local
+      const storedData = await chrome.storage.local.get([
+        'twitchUserToken',
+        'twitchConnectionStatus',
+        'twitchUsername',
+        STORAGE_KEYS.TWITCH_CONNECTION
+      ]);
+
+      // Si nous avons des données de connexion stockées, les utiliser immédiatement
+      if (storedData[STORAGE_KEYS.TWITCH_CONNECTION]) {
+        updateUIState(storedData[STORAGE_KEYS.TWITCH_CONNECTION]);
+      }
+
+      // Ensuite, vérifier le statut actuel
       const [streamResponse, subResponse] = await Promise.all([
         chrome.runtime.sendMessage({ action: "checkTwitchStatus" }),
         chrome.runtime.sendMessage({ 
@@ -161,14 +353,29 @@ document.addEventListener("DOMContentLoaded", async () => {
         })
       ]);
 
+      // Mettre à jour les informations du stream
       if (streamResponse && streamResponse.streamData) {
         updateStreamInfo(streamResponse.streamData);
       }
 
-      // Gérer les différents cas de réponse de l'abonnement
+      // Mettre à jour les informations d'abonnement
       if (subResponse) {
         if (subResponse.success && subResponse.subData) {
-          updateSubscriptionInfo(subResponse.subData);
+          // Créer un nouvel objet de connexion avec les données mises à jour
+          const connectionData = {
+            isConnected: true,
+            username: storedData.twitchUsername,
+            timestamp: Date.now(),
+            subInfo: subResponse.subData
+          };
+
+          // Sauvegarder les données mises à jour
+          await chrome.storage.local.set({
+            [STORAGE_KEYS.TWITCH_CONNECTION]: connectionData
+          });
+
+          // Mettre à jour l'interface
+          updateUIState(connectionData);
         } else {
           // En cas d'erreur ou de non-authentification
           updateSubscriptionInfo({
@@ -195,30 +402,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ===== Gestion du bouton de connexion Twitch =====
   const twitchLoginButton = document.getElementById("twitchLogin");
   if (twitchLoginButton) {
-    twitchLoginButton.addEventListener("click", async () => {
-      try {
-        const response = await chrome.runtime.sendMessage({
-          action: "authenticateTwitch",
-        });
-        if (response.success) {
-          console.log("Connexion Twitch réussie", response);
-          twitchLoginButton.textContent = "✓ Connecté";
-          twitchLoginButton.classList.add("connected");
-          twitchLoginButton.disabled = true;
-
-          // Rafraîchir les informations après connexion
-          await checkInitialStatus();
-        } else {
-          console.error("Échec de la connexion:", response.error);
-          alert(`Échec de la connexion : ${response.error}`);
-        }
-      } catch (error) {
-        console.error("Erreur de connexion:", error);
-        alert("Une erreur est survenue lors de la connexion.");
-      }
-    });
-  } else {
-    console.warn("Bouton de connexion Twitch introuvable.");
+    console.warn("L'ancien bouton de connexion Twitch est déprécié. Utilisez twitch-connect-btn à la place.");
   }
 
   // ===== Configuration du rafraîchissement automatique =====
@@ -333,70 +517,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Appeler l'initialisation au chargement
   initializeSubscriptionElements();
 
-  // Fonction pour mettre à jour l'affichage des informations d'abonnement
-  function updateSubscriptionInfo(subData) {
-    const subInfoElement = document.getElementById('subInfo');
-    const nextPaymentDateElement = document.getElementById('nextPaymentDate');
-
-    // Vérifier si l'utilisateur est authentifié
-    if (!subData.isAuthenticated) {
-      subInfoElement.innerHTML = `
-        <p class="sub-status not-authenticated">
-          Non connecté à Twitch
-        </p>
-      `;
-      subInfoElement.classList.remove('hidden');
-      
-      // Cacher l'élément de date de prochain paiement
-      if (nextPaymentDateElement) {
-        nextPaymentDateElement.classList.add('hidden');
-      }
-      
-      return;
-    }
-
-    // Vérifier si l'utilisateur est abonné
-    if (!subData.isSubscribed) {
-      subInfoElement.innerHTML = `
-        <p class="sub-status not-subscribed">
-          Pas abonné à AymenZeR
-        </p>
-      `;
-      subInfoElement.classList.remove('hidden');
-      
-      // Cacher l'élément de date de prochain paiement
-      if (nextPaymentDateElement) {
-        nextPaymentDateElement.classList.add('hidden');
-      }
-      
-      return;
-    }
-
-    // Préparer le message du tier
-    let tierMessage = `Abonné à ${subData.broadcaster_name} - ${subData.tierText}`;
-    
-    // Ajouter des informations sur le gifter si applicable
-    if (subData.gifter) {
-      tierMessage += ` (offert par ${subData.gifter.name})`;
-    }
-
-    // Mettre à jour l'élément d'information d'abonnement
-    subInfoElement.innerHTML = `
-      <p class="sub-status subscribed">
-        ${tierMessage}
-      </p>
-      ${subData.plan_name ? `<p class="sub-plan">${subData.plan_name}</p>` : ''}
-    `;
-
-    // Cacher l'élément de date de prochain paiement
-    if (nextPaymentDateElement) {
-      nextPaymentDateElement.classList.add('hidden');
-    }
-
-    // Rendre l'élément visible
-    subInfoElement.classList.remove('hidden');
-  }
-
   // Ajouter ou mettre à jour le style CSS
   const subInfoStyle = document.createElement('style');
   subInfoStyle.textContent = `
@@ -460,4 +580,168 @@ document.addEventListener("DOMContentLoaded", async () => {
   } else {
     console.warn('Bouton Paramètres non trouvé');
   }
+
+  // Fonction modifiée de gestion de la connexion
+  async function handleTwitchLogin() {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: "authenticateTwitch"
+      });
+      if (response.success) {
+        console.log("Connexion Twitch réussie", response);
+        
+        // Sauvegarder l'état de connexion
+        const connectionData = {
+          isConnected: true,
+          username: response.username,
+          timestamp: Date.now()
+        };
+        
+        // Sauvegarder à la fois dans le stockage local standard et notre stockage personnalisé
+        await chrome.storage.local.set({ 
+          twitchUserToken: response.token,
+          twitchConnectionStatus: true,
+          twitchUsername: response.username,
+          [STORAGE_KEYS.TWITCH_CONNECTION]: connectionData 
+        });
+
+        // Mettre à jour l'interface
+        updateUIState(connectionData);
+
+        // Rafraîchir les informations
+        await checkInitialStatus();
+      } else {
+        console.error("Échec de la connexion:", response.error);
+        alert(`Échec de la connexion : ${response.error}`);
+      }
+    } catch (error) {
+      console.error("Erreur de connexion:", error);
+      alert("Une erreur est survenue lors de la connexion.");
+    }
+  }
+
+  // Fonction modifiée de gestion de la déconnexion
+  async function handleTwitchLogout() {
+    try {
+      // Supprimer toutes les données de connexion
+      await chrome.storage.local.remove([
+        'twitchUserToken',
+        'twitchTokenTimestamp',
+        'twitchConnectionStatus',
+        'twitchUsername',
+        STORAGE_KEYS.TWITCH_CONNECTION
+      ]);
+
+      // Mettre à jour l'interface
+      updateUIState({ isConnected: false });
+    } catch (error) {
+      console.error("Erreur lors de la déconnexion:", error);
+      alert("Une erreur est survenue lors de la déconnexion.");
+    }
+  }
+
+  // Initialisation des écouteurs d'événements
+  const connectBtn = document.getElementById('twitch-connect-btn');
+  const disconnectBtn = document.getElementById('twitch-disconnect-btn');
+
+  if (connectBtn) {
+    connectBtn.addEventListener('click', handleTwitchLogin);
+  }
+
+  if (disconnectBtn) {
+    disconnectBtn.addEventListener('click', handleTwitchLogout);
+  }
+
+  // Vérifier l'état de connexion au chargement
+  await checkTwitchConnectionStatus();
+
+  // Rafraîchissement périodique du statut
+  setInterval(async () => {
+    await checkTwitchConnectionStatus();
+  }, 30000); // Vérifier toutes les 30 secondes
 });
+
+// Fonction de vérification du statut de connexion Twitch
+async function checkTwitchConnectionStatus() {
+  try {
+    const { 
+      twitchUserToken, 
+      twitchConnectionStatus, 
+      twitchUsername 
+    } = await chrome.storage.local.get([
+      'twitchUserToken', 
+      'twitchConnectionStatus', 
+      'twitchUsername'
+    ]);
+
+    // Si pas de token ou pas de statut de connexion, considérer comme déconnecté
+    if (!twitchUserToken || !twitchConnectionStatus) {
+      console.log("Aucun token ou statut de connexion trouvé");
+      await handleTokenInvalidation();
+      return;
+    }
+
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'getTwitchUsername' });
+      
+      if (response && response.success) {
+        // Sauvegarder l'état de connexion
+        const connectionData = {
+          isConnected: true,
+          username: response.username || twitchUsername,
+          timestamp: Date.now()
+        };
+        
+        // Récupérer les informations d'abonnement
+        try {
+          const subResponse = await chrome.runtime.sendMessage({ 
+            action: "getSubscriptionInfo",
+            broadcaster: "aymenzer"
+          });
+
+          if (subResponse && subResponse.success && subResponse.subData) {
+            connectionData.subInfo = subResponse.subData;
+          }
+        } catch (subError) {
+          console.error("Erreur lors de la récupération des informations d'abonnement:", subError);
+        }
+
+        // Sauvegarder l'état dans le stockage local
+        await chrome.storage.local.set({ 
+          [STORAGE_KEYS.TWITCH_CONNECTION]: connectionData 
+        });
+
+        // Mettre à jour l'interface
+        updateUIState(connectionData);
+      } else {
+        console.log("Échec de la vérification du nom d'utilisateur");
+        await handleTokenInvalidation();
+      }
+    } catch (error) {
+      console.error("Erreur lors de la vérification du nom d'utilisateur:", error);
+      await handleTokenInvalidation();
+    }
+  } catch (error) {
+    console.error('Erreur lors de la vérification du statut Twitch:', error);
+    await handleTokenInvalidation();
+  }
+}
+
+// Fonction de gestion de l'invalidation du token
+async function handleTokenInvalidation() {
+  try {
+    // Supprimer les informations de connexion stockées
+    await chrome.storage.local.remove([
+      'twitchUserToken',
+      'twitchTokenTimestamp',
+      'twitchConnectionStatus',
+      'twitchUsername',
+      STORAGE_KEYS.TWITCH_CONNECTION
+    ]);
+
+    // Mettre à jour l'interface
+    updateUIState({ isConnected: false });
+  } catch (error) {
+    console.error("Erreur lors de l'invalidation du token:", error);
+  }
+}
