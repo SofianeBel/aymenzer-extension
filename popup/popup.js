@@ -3,6 +3,7 @@ const STORAGE_KEYS = {
   IS_LIVE: "isLive",
   TWITCH_DATA: "twitchData",
   LAST_CHECK: "lastCheck",
+  SUB_INFO: "subInfo",
 };
 
 // ===== Fonction de mise à jour des informations du stream =====
@@ -111,6 +112,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 500);
   }, 1000);
 
+  // ===== Initialiser les éléments d'abonnement =====
+  initializeSubscriptionElements();
+
   // ===== Écouteur des changements de stockage =====
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === "local") {
@@ -149,16 +153,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ===== Fonction de vérification du statut initial =====
   async function checkInitialStatus() {
     try {
-      const response = await chrome.runtime.sendMessage({
-        action: "checkTwitchStatus",
-      });
-      if (response && response.streamData) {
-        updateStreamInfo(response.streamData);
-      } else {
-        // Si pas de données, vérifier dans le stockage local
-        chrome.storage.local.get([STORAGE_KEYS.TWITCH_DATA], (result) => {
-          updateStreamInfo(result[STORAGE_KEYS.TWITCH_DATA] || { data: [] });
-        });
+      const [streamResponse, subResponse] = await Promise.all([
+        chrome.runtime.sendMessage({ action: "checkTwitchStatus" }),
+        chrome.runtime.sendMessage({ 
+          action: "getSubscriptionInfo",
+          broadcaster: "aymenzer"
+        })
+      ]);
+
+      if (streamResponse && streamResponse.streamData) {
+        updateStreamInfo(streamResponse.streamData);
+      }
+
+      if (subResponse && subResponse.subData) {
+        updateSubscriptionInfo(subResponse.subData);
       }
     } catch (error) {
       console.error("Erreur lors de la vérification initiale:", error);
@@ -287,4 +295,123 @@ document.addEventListener("DOMContentLoaded", async () => {
   } else {
     console.warn("Bouton Rejoindre le Stream introuvable.");
   }
+
+  // Initialiser la structure des éléments d'abonnement
+  function initializeSubscriptionElements() {
+    const subscriptionDetailsDiv = document.getElementById('subscription-details');
+    if (!subscriptionDetailsDiv) {
+      console.error("Élément subscription-details non trouvé");
+      return;
+    }
+
+    // Créer l'élément subInfo s'il n'existe pas déjà
+    let subInfoDiv = document.getElementById('subInfo');
+    if (!subInfoDiv) {
+      console.log("Création de l'élément subInfo"); // Log pour déboguer
+      subInfoDiv = document.createElement('div');
+      subInfoDiv.id = 'subInfo';
+      subInfoDiv.classList.add('sub-info', 'hidden');
+      subscriptionDetailsDiv.appendChild(subInfoDiv);
+    }
+  }
+
+  // Appeler l'initialisation au chargement
+  initializeSubscriptionElements();
+
+  // Fonction pour mettre à jour l'affichage des informations d'abonnement
+  function updateSubscriptionInfo(subData) {
+    console.log("Données d'abonnement reçues:", subData);
+
+    const subInfo = document.getElementById('subInfo');
+    if (!subInfo) {
+      console.error("Élément subInfo non trouvé - erreur critique");
+      return;
+    }
+
+    if (subData && subData.data && subData.data.length > 0) {
+      const subscription = subData.data[0];
+      
+      // Calculer une date approximative (30 jours à partir d'aujourd'hui)
+      const renewalDate = new Date();
+      renewalDate.setDate(renewalDate.getDate() + 30);
+      
+      // Convertir le tier en format lisible
+      const tierLevel = subscription.tier === "1000" ? "1" : 
+                       subscription.tier === "2000" ? "2" : 
+                       subscription.tier === "3000" ? "3" : null;
+      
+      subInfo.innerHTML = `
+        <div class="sub-status">
+          <span class="sub-icon">💜</span>
+          <span class="sub-text">Abonné(e)${tierLevel ? ' - Tier ' + tierLevel : ''}</span>
+          ${subscription.is_gift ? '<span class="gift-badge">🎁 Offert</span>' : ''}
+        </div>
+        <div class="sub-time">
+          <span>Prochain renouvellement prévu le ${renewalDate.toLocaleDateString()}</span>
+        </div>
+        <div class="sub-details">
+          <span>Abonné(e) à ${subscription.broadcaster_name}</span>
+        </div>
+      `;
+      subInfo.classList.remove('hidden');
+    } else {
+      subInfo.innerHTML = `
+        <div class="sub-status">
+          <span class="sub-text">Non abonné(e)</span>
+        </div>
+      `;
+      subInfo.classList.remove('hidden');
+    }
+  }
+
+  // Ajouter ou mettre à jour le style CSS
+  const subInfoStyle = document.createElement('style');
+  subInfoStyle.textContent = `
+    .sub-info {
+      margin-top: 10px;
+      padding: 8px;
+      background: rgba(145, 70, 255, 0.1);
+      border-radius: 4px;
+      border: 1px solid rgba(145, 70, 255, 0.3);
+    }
+
+    .sub-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .sub-icon {
+      font-size: 1.2em;
+    }
+
+    .sub-text {
+      color: #9146FF;
+      font-weight: 500;
+    }
+
+    .gift-badge {
+      background: rgba(145, 70, 255, 0.2);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+
+    .sub-time {
+      font-size: 0.9em;
+      color: #666;
+      margin-bottom: 4px;
+    }
+
+    .sub-details {
+      font-size: 0.9em;
+      color: #666;
+    }
+
+    .hidden {
+      display: none;
+    }
+  `;
+  document.head.appendChild(subInfoStyle);
 });

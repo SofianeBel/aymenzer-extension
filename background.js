@@ -55,17 +55,111 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 // Écouter les changements de fréquence de vérification
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "updateCheckFrequency") {
-    const newFrequency = request.frequency;
+  switch (request.action) {
+    case "updateCheckFrequency":
+      const newFrequency = request.frequency;
+      chrome.storage.local.set({ checkFrequency: newFrequency });
+      setupAlarms(newFrequency);
+      sendResponse({ success: true });
+      return true;
 
-    // Mettre à jour la fréquence dans le stockage local
-    chrome.storage.local.set({ checkFrequency: newFrequency });
+    case "getSubscriptionInfo":
+      getSubscriptionInfo(request.broadcaster)
+        .then(subData => {
+          sendResponse({ success: true, subData });
+        })
+        .catch(error => {
+          console.error("Erreur lors de la récupération des infos d'abonnement:", error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
 
-    // Reconfigurer les alarmes
-    setupAlarms(newFrequency);
+    case "checkTwitchStatus":
+      chrome.storage.local.get(
+        [STORAGE_KEYS.TWITCH_DATA, STORAGE_KEYS.IS_LIVE],
+        async (result) => {
+          console.log("Données récupérées pour checkTwitchStatus:", result);
 
-    sendResponse({ success: true });
-    return true;
+          if (result[STORAGE_KEYS.TWITCH_DATA]) {
+            sendResponse({
+              streamData: result[STORAGE_KEYS.TWITCH_DATA],
+              isLive: result[STORAGE_KEYS.IS_LIVE],
+            });
+          } else {
+            try {
+              const streamData = await checkTwitch();
+              sendResponse({
+                streamData,
+                isLive: streamData.data && streamData.data.length > 0,
+              });
+            } catch (error) {
+              sendResponse({ error: error.message });
+            }
+          }
+        }
+      );
+      return true;
+
+    case "checkTwitch":
+      checkTwitch()
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, error: error.message }));
+      return true;
+
+    case "testTwitchNotification":
+      const testNotificationOptions = {
+        type: "basic",
+        iconUrl: DEFAULT_ICON,
+        title: "Test Notification Twitch",
+        message: "Ceci est une notification de test pour Twitch.",
+        buttons: [{ title: "Regarder" }],
+        requireInteraction: true,
+        priority: 2,
+        isFirstTime: true,
+      };
+
+      chrome.notifications.create(
+        "testTwitch",
+        testNotificationOptions,
+        (notificationId) => {
+          if (chrome.runtime.lastError) {
+            console.error("Erreur détaillée de notification:", {
+              errorMessage: chrome.runtime.lastError.message,
+              notificationOptions: testNotificationOptions,
+            });
+            addLog(`Erreur notification test complet: 
+            - Message: ${chrome.runtime.lastError.message}
+            - Options: ${JSON.stringify(testNotificationOptions)}`);
+            sendResponse({
+              success: false,
+              error: chrome.runtime.lastError.message,
+              details: JSON.stringify(testNotificationOptions),
+            });
+          } else {
+            console.log("Notification Twitch de test créée avec succès");
+            addLog("Notification de test Twitch créée avec succès");
+            sendResponse({ success: true, notificationId: notificationId });
+          }
+        }
+      );
+      return true;
+
+    case "getLogs":
+      chrome.storage.local.get(["logs"], (result) => {
+        sendResponse({ logs: result.logs || [] });
+      });
+      return true;
+
+    case "authenticateTwitch":
+      authenticateTwitch()
+        .then(response => sendResponse(response))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
+    default:
+      console.error("Action inconnue:", request.action);
+      sendResponse({ success: false, error: "Action inconnue" });
+      return false;
   }
 });
 
@@ -129,6 +223,7 @@ async function checkTwitch() {
       } secondes`
     );
 
+    // Utiliser le cache si disponible et récent
     if (
       timeSinceLastCheck < 5 * 60 * 1000 &&
       storage[STORAGE_KEYS.TWITCH_DATA]
@@ -137,130 +232,71 @@ async function checkTwitch() {
       return storage[STORAGE_KEYS.TWITCH_DATA];
     }
 
-    // Obtenir le token
-    const tokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        client_id: TWITCH_CLIENT_ID,
-        client_secret: TWITCH_CLIENT_SECRET,
-        grant_type: "client_credentials",
-      }),
-    });
+    // Obtenir le token avec gestion d'erreur améliorée
+    let tokenResponse;
+    try {
+      tokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "application/json"
+        },
+        body: new URLSearchParams({
+          client_id: TWITCH_CLIENT_ID,
+          client_secret: TWITCH_CLIENT_SECRET,
+          grant_type: "client_credentials",
+        }),
+        mode: "cors"
+      });
 
-    if (!tokenResponse.ok) {
-      throw new Error(
-        `Erreur lors de la récupération du token: ${tokenResponse.status}`
-      );
+      if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        addLog(`Erreur token Twitch: Status ${tokenResponse.status}, Response: ${errorText}`);
+        throw new Error(`Erreur token Twitch (${tokenResponse.status}): ${errorText}`);
+      }
+    } catch (error) {
+      addLog(`Erreur fetch token Twitch: ${error.message}`);
+      throw new Error(`Erreur lors de la récupération du token: ${error.message}`);
     }
 
     const tokenData = await tokenResponse.json();
-    addLog("Token Twitch obtenu avec succès");
+    
+    if (!tokenData.access_token) {
+      addLog("Token d'accès manquant dans la réponse");
+      throw new Error("Token d'accès manquant dans la réponse");
+    }
 
-    // Vérifier le stream
+    // Obtenir les informations du stream
     const streamResponse = await fetch(
       `https://api.twitch.tv/helix/streams?user_login=${TWITCH_USERNAME}`,
       {
         headers: {
           "Client-ID": TWITCH_CLIENT_ID,
-          Authorization: `Bearer ${tokenData.access_token}`,
+          "Authorization": `Bearer ${tokenData.access_token}`,
+          "Accept": "application/json"
         },
+        mode: "cors"
       }
     );
 
     if (!streamResponse.ok) {
-      throw new Error(
-        `Erreur lors de la vérification du stream: ${streamResponse.status}`
-      );
+      const errorText = await streamResponse.text();
+      addLog(`Erreur API Twitch: Status ${streamResponse.status}, Response: ${errorText}`);
+      throw new Error(`Erreur API Twitch (${streamResponse.status}): ${errorText}`);
     }
 
     const streamData = await streamResponse.json();
-    console.log("Données du stream:", streamData);
 
-    const isLive = streamData.data && streamData.data.length > 0;
-    const wasLive = await getIsLive();
-
-    // Mettre à jour l'état isLive dans le stockage
+    // Mettre à jour le stockage
     await chrome.storage.local.set({
       [STORAGE_KEYS.TWITCH_DATA]: streamData,
-      [STORAGE_KEYS.IS_LIVE]: isLive,
-      [STORAGE_KEYS.LAST_CHECK]: {
-        ...storage[STORAGE_KEYS.LAST_CHECK],
-        twitch: now,
-      },
+      [STORAGE_KEYS.LAST_CHECK]: { twitch: now },
+      [STORAGE_KEYS.IS_LIVE]: streamData.data && streamData.data.length > 0,
     });
-
-    // Vérifier si c'est un nouveau stream différent du dernier stream notifié
-    const currentStreamId = isLive ? streamData.data[0].id : null;
-    const lastNotifiedStreamId = storage.lastStreamNotification;
-
-    // Logs détaillés sur l'état du stream
-    addLog(`État du stream:`);
-    addLog(`- Stream en direct : ${isLive}`);
-    addLog(`- Était en direct précédemment : ${wasLive}`);
-    addLog(`- ID du stream actuel : ${currentStreamId}`);
-    addLog(`- ID du dernier stream notifié : ${lastNotifiedStreamId}`);
-
-    // Conditions pour envoyer une notification
-    const shouldSendNotification =
-      isLive && // Le stream est en ligne
-      !wasLive && // Le stream n'était pas en ligne avant
-      currentStreamId !== lastNotifiedStreamId; // L'ID du stream est différent du dernier stream notifié
-
-    addLog(`Conditions pour notification :`);
-    addLog(`- Doit envoyer notification : ${shouldSendNotification}`);
-
-    if (shouldSendNotification) {
-      const notificationOptions = {
-        type: "basic",
-        iconUrl: chrome.runtime.getURL("icons/A_AE_neon_1.png"),
-        title: "AymenZeR Notifier • maintenant",
-        message: `🔴 En direct\n\n${streamData.data[0].title}\n\n🎮 ${
-          streamData.data[0].game_name
-        }\n👥 ${streamData.data[0].viewer_count.toLocaleString()} spectateurs`,
-        contextMessage: "Special Events",
-        priority: 2,
-        buttons: [
-          { title: "▶️ Regarder le stream" },
-          { title: "🔕 Ne plus afficher" },
-        ],
-        requireInteraction: true,
-        silent: false,
-      };
-
-      chrome.notifications.create(
-        `Twitch_${Date.now()}`,
-        notificationOptions,
-        (notificationId) => {
-          addLog(`Notification créée :`);
-          addLog(`- ID de notification : ${notificationId}`);
-
-          // Marquer le stream actuel comme notifié
-          chrome.storage.local.set(
-            {
-              lastStreamNotification: currentStreamId,
-              firstTimeNotification: true,
-            },
-            () => {
-              addLog(`Stockage mis à jour :`);
-              addLog(`- Dernier stream notifié : ${currentStreamId}`);
-              addLog(`- Première notification : true`);
-            }
-          );
-        }
-      );
-
-      addLog(
-        `Notification créée pour le stream de ${streamData.data[0].user_name}`
-      );
-    }
 
     return streamData;
   } catch (error) {
-    console.error("Erreur Twitch:", error);
-    addLog(`Erreur Twitch: ${error.message}`);
+    addLog(`Erreur dans checkTwitch: ${error.message}`);
     throw error;
   }
 }
@@ -351,112 +387,13 @@ function checkAlarms() {
 // Appeler checkAlarms au démarrage
 checkAlarms();
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "checkTwitchStatus") {
-    chrome.storage.local.get(
-      [STORAGE_KEYS.TWITCH_DATA, STORAGE_KEYS.IS_LIVE],
-      async (result) => {
-        console.log("Données récupérées pour checkTwitchStatus:", result);
-
-        if (result[STORAGE_KEYS.TWITCH_DATA]) {
-          sendResponse({
-            streamData: result[STORAGE_KEYS.TWITCH_DATA],
-            isLive: result[STORAGE_KEYS.IS_LIVE],
-          });
-        } else {
-          try {
-            const streamData = await checkTwitch();
-            sendResponse({
-              streamData,
-              isLive: streamData.data && streamData.data.length > 0,
-            });
-          } catch (error) {
-            sendResponse({ error: error.message });
-          }
-        }
-      }
-    );
-    return true; // Important pour l'async
-  }
-  switch (request.action) {
-    case "checkTwitch":
-      checkTwitch()
-        .then(() => sendResponse({ success: true }))
-        .catch((error) =>
-          sendResponse({ success: false, error: error.message })
-        );
-      return true;
-
-    case "testTwitchNotification":
-      const testNotificationOptions = {
-        type: "basic",
-        iconUrl: DEFAULT_ICON,
-        title: "Test Notification Twitch",
-        message: "Ceci est une notification de test pour Twitch.",
-        buttons: [{ title: "Regarder" }],
-        requireInteraction: true,
-        priority: 2,
-        isFirstTime: true,
-      };
-
-      chrome.notifications.create(
-        "testTwitch",
-        testNotificationOptions,
-        (notificationId) => {
-          console.log(
-            "Tentative de création de notification:",
-            testNotificationOptions
-          );
-
-          if (chrome.runtime.lastError) {
-            console.error("Erreur détaillée de notification:", {
-              errorMessage: chrome.runtime.lastError.message,
-              notificationOptions: testNotificationOptions,
-            });
-
-            // Log plus détaillé
-            addLog(`Erreur notification test complet: 
-            - Message: ${chrome.runtime.lastError.message}
-            - Options: ${JSON.stringify(testNotificationOptions)}`);
-
-            sendResponse({
-              success: false,
-              error: chrome.runtime.lastError.message,
-              details: JSON.stringify(testNotificationOptions),
-            });
-          } else {
-            console.log("Notification Twitch de test créée avec succès");
-            addLog("Notification de test Twitch créée avec succès");
-            sendResponse({ success: true, notificationId: notificationId });
-          }
-        }
-      );
-      return true;
-
-    case "getLogs":
-      chrome.storage.local.get(["logs"], (result) => {
-        sendResponse({ logs: result.logs || [] });
-      });
-      return true;
-
-    case "authenticateTwitch":
-      authenticateTwitch().then(sendResponse);
-      return true;
-
-    default:
-      console.error("Action inconnue:", request.action);
-      sendResponse({ success: false, error: "Action inconnue" });
-      return false;
-  }
-});
-
 async function authenticateTwitch() {
   const clientId = TWITCH_CLIENT_ID;
   const redirectUri = chrome.identity.getRedirectURL("oauth2");
-  const scope = "user:read:email user:read:subscriptions";
+  const scope = "user:read:email channel:read:subscriptions user:read:subscriptions";
   const state = generateRandomState(16);
 
-  console.log("URL de redirection:", redirectUri); // Pour vérification
+  console.log("URL de redirection:", redirectUri);
 
   const authUrl =
     `https://id.twitch.tv/oauth2/authorize?` +
@@ -484,6 +421,24 @@ async function authenticateTwitch() {
       throw new Error("Pas de token d'accès dans la réponse");
     }
 
+    // Validate the token immediately after getting it
+    try {
+      const validateResponse = await fetch('https://id.twitch.tv/oauth2/validate', {
+        headers: {
+          'Authorization': `OAuth ${accessToken}`
+        }
+      });
+      
+      if (!validateResponse.ok) {
+        throw new Error("Token invalide");
+      }
+      
+      const validateData = await validateResponse.json();
+      console.log("Token validé:", validateData);
+    } catch (error) {
+      throw new Error(`Erreur de validation du token: ${error.message}`);
+    }
+
     // Sauvegarder le token
     await chrome.storage.local.set({
       twitchUserToken: accessToken,
@@ -503,4 +458,114 @@ function generateRandomState(length) {
   return Array.from(crypto.getRandomValues(new Uint8Array(length)))
     .map((x) => charset[x % charset.length])
     .join("");
+}
+
+// Ajouter cette nouvelle fonction pour récupérer les informations d'abonnement
+async function getSubscriptionInfo(broadcasterLogin) {
+  try {
+    // Vérifier si on a un token utilisateur
+    const storage = await chrome.storage.local.get(['twitchUserToken', 'twitchTokenTimestamp']);
+    if (!storage.twitchUserToken) {
+      throw new Error("Non connecté à Twitch");
+    }
+
+    // Vérifier si le token n'est pas expiré (plus de 4 heures)
+    const tokenAge = Date.now() - (storage.twitchTokenTimestamp || 0);
+    if (tokenAge > 4 * 60 * 60 * 1000) { // 4 heures en millisecondes
+      throw new Error("Token expiré, veuillez vous reconnecter");
+    }
+
+    // D'abord, obtenir l'ID du broadcaster
+    const broadcasterResponse = await fetch(
+      `https://api.twitch.tv/helix/users?login=${broadcasterLogin}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${storage.twitchUserToken}`,
+          'Client-Id': TWITCH_CLIENT_ID,
+          'Accept': 'application/json'
+        },
+        mode: 'cors'
+      }
+    );
+
+    if (!broadcasterResponse.ok) {
+      const errorText = await broadcasterResponse.text();
+      console.error("Erreur broadcaster response:", errorText);
+      throw new Error(`Impossible de récupérer les informations du broadcaster: ${broadcasterResponse.status}`);
+    }
+
+    const broadcasterData = await broadcasterResponse.json();
+    if (!broadcasterData.data || broadcasterData.data.length === 0) {
+      throw new Error("Broadcaster non trouvé");
+    }
+
+    const broadcasterId = broadcasterData.data[0].id;
+    console.log("Broadcaster ID obtenu:", broadcasterId);
+
+    // Obtenir l'ID de l'utilisateur connecté
+    const userResponse = await fetch('https://api.twitch.tv/helix/users', {
+      headers: {
+        'Authorization': `Bearer ${storage.twitchUserToken}`,
+        'Client-Id': TWITCH_CLIENT_ID,
+        'Accept': 'application/json'
+      },
+      mode: 'cors'
+    });
+
+    if (!userResponse.ok) {
+      const errorText = await userResponse.text();
+      console.error("Erreur user response:", errorText);
+      throw new Error(`Impossible de récupérer les informations de l'utilisateur: ${userResponse.status}`);
+    }
+
+    const userData = await userResponse.json();
+    if (!userData.data || userData.data.length === 0) {
+      throw new Error("Impossible de récupérer l'ID de l'utilisateur");
+    }
+
+    const userId = userData.data[0].id;
+    console.log("User ID obtenu:", userId);
+
+    // Ensuite, vérifier l'abonnement avec les deux IDs
+    const subResponse = await fetch(
+      `https://api.twitch.tv/helix/subscriptions/user?broadcaster_id=${broadcasterId}&user_id=${userId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${storage.twitchUserToken}`,
+          'Client-Id': TWITCH_CLIENT_ID,
+          'Accept': 'application/json'
+        },
+        mode: 'cors'
+      }
+    );
+
+    if (!subResponse.ok) {
+      const errorText = await subResponse.text();
+      console.error("Erreur subscription response:", errorText);
+      throw new Error(`Impossible de récupérer les informations d'abonnement: ${subResponse.status}`);
+    }
+
+    const subData = await subResponse.json();
+    console.log("Données d'abonnement reçues:", subData);
+    
+    if (!subData.data || subData.data.length === 0) {
+      return {
+        isSubscribed: false
+      };
+    }
+
+    const subscription = subData.data[0];
+    return {
+      isSubscribed: true,
+      tier: subscription.tier,
+      end_date: new Date(subscription.expires_at || Date.now() + (30 * 24 * 60 * 60 * 1000)),
+      broadcaster_name: subscription.broadcaster_name,
+      plan_name: subscription.plan_name
+    };
+
+  } catch (error) {
+    console.error("Erreur détaillée dans getSubscriptionInfo:", error);
+    addLog(`Erreur getSubscriptionInfo: ${error.message}`);
+    throw error;
+  }
 }
