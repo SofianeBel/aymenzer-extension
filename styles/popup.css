@@ -257,20 +257,6 @@ body {
   display: none;
 }
 
-.dev-menu-link {
-  margin-top: 20px;
-  text-align: center;
-}
-
-.dev-button {
-  background-color: #f1c40f;
-  color: #000;
-}
-
-.dev-button:hover {
-  background-color: #d4ac0d;
-}
-
 #subscription-details {
   margin-top: 10px;
   padding: 10px;
