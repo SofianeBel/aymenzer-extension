@@ -26,7 +26,6 @@
     "default_popup": "popup/popup.html"
   },
   "options_page": "settings/settings.html",
-  "devtools_page": "popup/dev.html",
   "oauth2": {
     "client_id": "8xiery290o0ioczddjogf337p1etp7",
     "scopes": ["user:read:email", "user:read:subscriptions"]
