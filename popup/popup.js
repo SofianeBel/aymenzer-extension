@@ -165,11 +165,26 @@ document.addEventListener("DOMContentLoaded", async () => {
         updateStreamInfo(streamResponse.streamData);
       }
 
-      if (subResponse && subResponse.subData) {
-        updateSubscriptionInfo(subResponse.subData);
+      // Gérer les différents cas de réponse de l'abonnement
+      if (subResponse) {
+        if (subResponse.success && subResponse.subData) {
+          updateSubscriptionInfo(subResponse.subData);
+        } else {
+          // En cas d'erreur ou de non-authentification
+          updateSubscriptionInfo({
+            isAuthenticated: false,
+            isSubscribed: false,
+            message: subResponse.error || "Impossible de récupérer les informations d'abonnement"
+          });
+        }
       }
     } catch (error) {
       console.error("Erreur lors de la vérification initiale:", error);
+      updateSubscriptionInfo({
+        isAuthenticated: false,
+        isSubscribed: false,
+        message: "Erreur de connexion"
+      });
     }
   }
 
@@ -320,48 +335,66 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Fonction pour mettre à jour l'affichage des informations d'abonnement
   function updateSubscriptionInfo(subData) {
-    console.log("Données d'abonnement reçues:", subData);
+    const subInfoElement = document.getElementById('subInfo');
+    const nextPaymentDateElement = document.getElementById('nextPaymentDate');
 
-    const subInfo = document.getElementById('subInfo');
-    if (!subInfo) {
-      console.error("Élément subInfo non trouvé - erreur critique");
+    // Vérifier si l'utilisateur est authentifié
+    if (!subData.isAuthenticated) {
+      subInfoElement.innerHTML = `
+        <p class="sub-status not-authenticated">
+          Non connecté à Twitch
+        </p>
+      `;
+      subInfoElement.classList.remove('hidden');
+      
+      // Cacher l'élément de date de prochain paiement
+      if (nextPaymentDateElement) {
+        nextPaymentDateElement.classList.add('hidden');
+      }
+      
       return;
     }
 
-    if (subData && subData.data && subData.data.length > 0) {
-      const subscription = subData.data[0];
-      
-      // Calculer une date approximative (30 jours à partir d'aujourd'hui)
-      const renewalDate = new Date();
-      renewalDate.setDate(renewalDate.getDate() + 30);
-      
-      // Convertir le tier en format lisible
-      const tierLevel = subscription.tier === "1000" ? "1" : 
-                       subscription.tier === "2000" ? "2" : 
-                       subscription.tier === "3000" ? "3" : null;
-      
-      subInfo.innerHTML = `
-        <div class="sub-status">
-          <span class="sub-icon">💜</span>
-          <span class="sub-text">Abonné(e)${tierLevel ? ' - Tier ' + tierLevel : ''}</span>
-          ${subscription.is_gift ? '<span class="gift-badge">🎁 Offert</span>' : ''}
-        </div>
-        <div class="sub-time">
-          <span>Prochain renouvellement prévu le ${renewalDate.toLocaleDateString()}</span>
-        </div>
-        <div class="sub-details">
-          <span>Abonné(e) à ${subscription.broadcaster_name}</span>
-        </div>
+    // Vérifier si l'utilisateur est abonné
+    if (!subData.isSubscribed) {
+      subInfoElement.innerHTML = `
+        <p class="sub-status not-subscribed">
+          Pas abonné à AymenZeR
+        </p>
       `;
-      subInfo.classList.remove('hidden');
-    } else {
-      subInfo.innerHTML = `
-        <div class="sub-status">
-          <span class="sub-text">Non abonné(e)</span>
-        </div>
-      `;
-      subInfo.classList.remove('hidden');
+      subInfoElement.classList.remove('hidden');
+      
+      // Cacher l'élément de date de prochain paiement
+      if (nextPaymentDateElement) {
+        nextPaymentDateElement.classList.add('hidden');
+      }
+      
+      return;
     }
+
+    // Préparer le message du tier
+    let tierMessage = `Abonné à ${subData.broadcaster_name} - ${subData.tierText}`;
+    
+    // Ajouter des informations sur le gifter si applicable
+    if (subData.gifter) {
+      tierMessage += ` (offert par ${subData.gifter.name})`;
+    }
+
+    // Mettre à jour l'élément d'information d'abonnement
+    subInfoElement.innerHTML = `
+      <p class="sub-status subscribed">
+        ${tierMessage}
+      </p>
+      ${subData.plan_name ? `<p class="sub-plan">${subData.plan_name}</p>` : ''}
+    `;
+
+    // Cacher l'élément de date de prochain paiement
+    if (nextPaymentDateElement) {
+      nextPaymentDateElement.classList.add('hidden');
+    }
+
+    // Rendre l'élément visible
+    subInfoElement.classList.remove('hidden');
   }
 
   // Ajouter ou mettre à jour le style CSS
@@ -414,4 +447,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   `;
   document.head.appendChild(subInfoStyle);
+
+  // Gestion du bouton Paramètres
+  const settingsBtn = document.getElementById('settingsBtn');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', function() {
+      // Ouvrir la page des paramètres dans un nouvel onglet
+      chrome.tabs.create({ 
+        url: chrome.runtime.getURL('settings/settings.html') 
+      });
+    });
+  } else {
+    console.warn('Bouton Paramètres non trouvé');
+  }
 });

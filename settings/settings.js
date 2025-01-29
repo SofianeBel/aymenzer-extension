@@ -1,41 +1,48 @@
 // Configuration par défaut
 const DEFAULT_SETTINGS = {
-  liveNotif: true,
-  liveSound: true,
-  gameChangeNotif: true,
-  gameChangeSound: false,
-  subRenewalNotif: true,
-  subRenewalSound: true,
-  checkFrequency: 30
+  streamNotifications: true,
+  notificationSound: 'default',
+  checkFrequency: 30,
+  autoRefresh: false,
+  theme: 'dark',
+  debugMode: false
 };
 
 // Éléments DOM
 const elements = {
-  liveNotif: document.getElementById('liveNotif'),
-  liveSoundIcon: document.getElementById('liveSoundIcon'),
-  gameChangeNotif: document.getElementById('gameChangeNotif'),
-  gameChangeSoundIcon: document.getElementById('gameChangeSoundIcon'),
-  subRenewalNotif: document.getElementById('subRenewalNotif'),
-  subRenewalSoundIcon: document.getElementById('subRenewalSoundIcon'),
-  checkFrequency: document.getElementById('checkFrequency'),
-  saveBtn: document.getElementById('saveBtn'),
-  resetBtn: document.getElementById('resetBtn')
+  streamNotifications: document.getElementById('stream-notifications'),
+  notificationSound: document.getElementById('notification-sound'),
+  checkFrequency: document.getElementById('check-frequency'),
+  autoRefresh: document.getElementById('auto-refresh'),
+  themeSelect: document.getElementById('theme-select'),
+  debugMode: document.getElementById('debug-mode'),
+  saveBtn: document.getElementById('save-settings'),
+  resetBtn: document.getElementById('reset-settings')
+};
+
+// Éléments DOM pour la connexion Twitch
+const twitchElements = {
+  username: document.getElementById('twitch-username'),
+  connectBtn: document.getElementById('twitch-connect-btn'),
+  disconnectBtn: document.getElementById('twitch-disconnect-btn')
 };
 
 // Charger les paramètres
 async function loadSettings() {
   try {
-    const settings = await chrome.storage.local.get('settings');
-    const currentSettings = settings.settings || DEFAULT_SETTINGS;
+    const { settings } = await chrome.storage.sync.get('settings');
+    const currentSettings = settings || DEFAULT_SETTINGS;
 
     // Mettre à jour l'interface
-    elements.liveNotif.checked = currentSettings.liveNotif;
-    updateSoundIcon(elements.liveSoundIcon, currentSettings.liveSound);
-    elements.gameChangeNotif.checked = currentSettings.gameChangeNotif;
-    updateSoundIcon(elements.gameChangeSoundIcon, currentSettings.gameChangeSound);
-    elements.subRenewalNotif.checked = currentSettings.subRenewalNotif;
-    updateSoundIcon(elements.subRenewalSoundIcon, currentSettings.subRenewalSound);
+    elements.streamNotifications.checked = currentSettings.streamNotifications;
+    elements.notificationSound.value = currentSettings.notificationSound;
     elements.checkFrequency.value = currentSettings.checkFrequency.toString();
+    elements.autoRefresh.checked = currentSettings.autoRefresh;
+    elements.themeSelect.value = currentSettings.theme;
+    elements.debugMode.checked = currentSettings.debugMode;
+
+    // Mettre à jour le thème
+    document.documentElement.setAttribute('data-theme', currentSettings.theme);
   } catch (error) {
     console.error('Erreur lors du chargement des paramètres:', error);
   }
@@ -45,21 +52,23 @@ async function loadSettings() {
 async function saveSettings() {
   try {
     const settings = {
-      liveNotif: elements.liveNotif.checked,
-      liveSound: elements.liveSoundIcon.src.includes('sound-on'),
-      gameChangeNotif: elements.gameChangeNotif.checked,
-      gameChangeSound: elements.gameChangeSoundIcon.src.includes('sound-on'),
-      subRenewalNotif: elements.subRenewalNotif.checked,
-      subRenewalSound: elements.subRenewalSoundIcon.src.includes('sound-on'),
-      checkFrequency: parseInt(elements.checkFrequency.value)
+      streamNotifications: elements.streamNotifications.checked,
+      notificationSound: elements.notificationSound.value,
+      checkFrequency: parseInt(elements.checkFrequency.value),
+      autoRefresh: elements.autoRefresh.checked,
+      theme: elements.themeSelect.value,
+      debugMode: elements.debugMode.checked
     };
 
-    await chrome.storage.local.set({ settings });
+    await chrome.storage.sync.set({ settings });
     
-    // Mettre à jour la fréquence de vérification
+    // Mettre à jour le thème
+    document.documentElement.setAttribute('data-theme', settings.theme);
+
+    // Envoyer un message au background script pour mettre à jour les paramètres
     chrome.runtime.sendMessage({ 
-      action: 'updateCheckFrequency', 
-      frequency: settings.checkFrequency 
+      action: 'updateSettings', 
+      settings: settings 
     });
 
     showSaveConfirmation();
@@ -72,18 +81,13 @@ async function saveSettings() {
 // Réinitialiser les paramètres
 async function resetSettings() {
   try {
-    await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
+    await chrome.storage.sync.set({ settings: DEFAULT_SETTINGS });
     await loadSettings();
     showSaveConfirmation('Paramètres réinitialisés !');
   } catch (error) {
     console.error('Erreur lors de la réinitialisation des paramètres:', error);
     alert('Erreur lors de la réinitialisation des paramètres');
   }
-}
-
-// Mettre à jour l'icône du son
-function updateSoundIcon(iconElement, isEnabled) {
-  iconElement.src = `../icons/sound-${isEnabled ? 'on' : 'off'}.png`;
 }
 
 // Afficher une confirmation de sauvegarde
@@ -99,6 +103,7 @@ function showSaveConfirmation(message = 'Paramètres sauvegardés !') {
     color: white;
     padding: 10px 20px;
     border-radius: 5px;
+    z-index: 1000;
     animation: fadeInOut 2s ease-in-out;
   `;
 
@@ -111,13 +116,72 @@ document.addEventListener('DOMContentLoaded', loadSettings);
 elements.saveBtn.addEventListener('click', saveSettings);
 elements.resetBtn.addEventListener('click', resetSettings);
 
-// Gestionnaires pour les icônes de son
-[elements.liveSoundIcon, elements.gameChangeSoundIcon, elements.subRenewalSoundIcon].forEach(icon => {
-  icon.addEventListener('click', () => {
-    const isEnabled = icon.src.includes('sound-on');
-    updateSoundIcon(icon, !isEnabled);
-  });
+// Gestionnaire de changement de thème
+elements.themeSelect.addEventListener('change', () => {
+  const selectedTheme = elements.themeSelect.value;
+  document.documentElement.setAttribute('data-theme', selectedTheme);
 });
+
+// Vérifier le statut de connexion Twitch au chargement
+async function checkTwitchConnectionStatus() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getTwitchUsername' });
+    
+    if (response.success) {
+      // Connecté
+      twitchElements.username.textContent = response.username;
+      twitchElements.connectBtn.style.display = 'none';
+      twitchElements.disconnectBtn.style.display = 'inline-block';
+    } else {
+      // Non connecté
+      twitchElements.username.textContent = 'Non connecté';
+      twitchElements.connectBtn.style.display = 'inline-block';
+      twitchElements.disconnectBtn.style.display = 'none';
+    }
+  } catch (error) {
+    console.error('Erreur lors de la vérification du statut Twitch:', error);
+    twitchElements.username.textContent = 'Erreur de connexion';
+  }
+}
+
+// Gestionnaire de connexion Twitch
+async function connectTwitch() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'authenticateTwitch' });
+    
+    if (response.success) {
+      await checkTwitchConnectionStatus();
+      showSaveConfirmation('Connexion Twitch réussie !');
+    } else {
+      alert(`Erreur de connexion : ${response.error}`);
+    }
+  } catch (error) {
+    console.error('Erreur de connexion Twitch:', error);
+    alert('Impossible de se connecter à Twitch');
+  }
+}
+
+// Gestionnaire de déconnexion Twitch
+async function disconnectTwitch() {
+  try {
+    // Supprimer le token Twitch du stockage local
+    await chrome.storage.local.remove('twitchUserToken');
+    await chrome.storage.local.remove('twitchTokenTimestamp');
+    
+    await checkTwitchConnectionStatus();
+    showSaveConfirmation('Déconnexion Twitch réussie');
+  } catch (error) {
+    console.error('Erreur de déconnexion Twitch:', error);
+    alert('Impossible de se déconnecter de Twitch');
+  }
+}
+
+// Ajouter les écouteurs d'événements pour la connexion Twitch
+twitchElements.connectBtn.addEventListener('click', connectTwitch);
+twitchElements.disconnectBtn.addEventListener('click', disconnectTwitch);
+
+// Vérifier le statut de connexion au chargement
+document.addEventListener('DOMContentLoaded', checkTwitchConnectionStatus);
 
 // Ajouter du CSS pour l'animation
 const style = document.createElement('style');

@@ -5,6 +5,20 @@ const TWITCH_CLIENT_SECRET = "sz36mo8huivxyd3bqtbzhqq2ukkk7y";
 // Configuration par défaut
 const DEFAULT_CHECK_INTERVAL = 60; // Vérification toutes les 60 secondes
 
+// Configuration par défaut des paramètres
+const DEFAULT_SETTINGS = {
+  streamNotifications: true,
+  notificationSound: 'default',
+  checkFrequency: 60,
+  autoRefresh: true,
+  theme: 'dark',
+  debugMode: false
+};
+
+// Ajout des constantes pour le scraping
+const SCRAPING_STORAGE_KEY = 'web_subreddit_scraping';
+const SCRAPING_SCRIPT_PATH = 'scraper_web_subreddit.py';
+
 // Fonction principale pour configurer les alarmes
 function setupAlarms(checkInterval = DEFAULT_CHECK_INTERVAL) {
   // Supprimer toute alarme existante
@@ -37,14 +51,21 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // Lors de l'installation de l'extension
 chrome.runtime.onInstalled.addListener(async () => {
   // Configuration initiale du stockage
+  await chrome.storage.sync.set({
+    extensionSettings: DEFAULT_SETTINGS
+  });
+
   await chrome.storage.local.set({
-    checkFrequency: DEFAULT_CHECK_INTERVAL,
+    checkFrequency: DEFAULT_SETTINGS.checkFrequency,
     logs: [],
     isLive: false,
   });
 
   // Configurer les alarmes
-  setupAlarms();
+  setupAlarms(DEFAULT_SETTINGS.checkFrequency);
+
+  // Configurer les notifications initiales
+  updateNotificationSettings(DEFAULT_SETTINGS);
 
   // Vérification initiale
   checkTwitch().catch((error) => {
@@ -154,6 +175,121 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       authenticateTwitch()
         .then(response => sendResponse(response))
         .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
+    case "updateSettings":
+      // Récupérer les paramètres actuels
+      chrome.storage.sync.get('extensionSettings', (result) => {
+        const currentSettings = result.extensionSettings || DEFAULT_SETTINGS;
+        const newSettings = { ...currentSettings, ...request.settings };
+
+        // Sauvegarder les nouveaux paramètres
+        chrome.storage.sync.set({ extensionSettings: newSettings }, () => {
+          // Ajuster les alarmes
+          setupAlarms(newSettings.checkFrequency);
+
+          // Gérer les notifications
+          updateNotificationSettings(newSettings);
+
+          // Mode débogage
+          if (newSettings.debugMode) {
+            debugLog('Paramètres mis à jour', newSettings);
+          }
+
+          // Propager le changement de thème
+          chrome.tabs.query({}, (tabs) => {
+            tabs.forEach(tab => {
+              chrome.tabs.sendMessage(tab.id, {
+                action: 'applyTheme',
+                theme: newSettings.theme
+              });
+            });
+          });
+
+          // Répondre au message
+          sendResponse({ 
+            success: true, 
+            settings: newSettings,
+            message: 'Paramètres mis à jour avec succès' 
+          });
+        });
+      });
+      return true;
+
+    case "getSettings":
+      // Récupérer les paramètres actuels
+      chrome.storage.sync.get('extensionSettings', (result) => {
+        const currentSettings = result.extensionSettings || DEFAULT_SETTINGS;
+        sendResponse({ 
+          success: true, 
+          settings: currentSettings 
+        });
+      });
+      return true;
+
+    case "updateTheme":
+      // Propager le changement de thème à toutes les fenêtres
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'applyTheme',
+            theme: request.theme
+          });
+        });
+      });
+      sendResponse({ success: true });
+      return true;
+
+    case "getTwitchUsername":
+      chrome.storage.local.get('twitchUserToken', async (result) => {
+        if (result.twitchUserToken) {
+          try {
+            // Valider le token avant de l'utiliser
+            const validationResult = await validateTwitchToken(result.twitchUserToken);
+            
+            if (validationResult.valid) {
+              sendResponse({ 
+                success: true, 
+                username: validationResult.userData.login 
+              });
+            } else {
+              // Tenter de rafraîchir le token
+              const refreshResult = await refreshTwitchToken();
+              
+              if (refreshResult.success) {
+                // Nouveau token obtenu
+                sendResponse({ 
+                  success: true, 
+                  username: refreshResult.userData.login 
+                });
+              } else {
+                // Échec du rafraîchissement
+                sendResponse({ 
+                  success: false, 
+                  error: 'Token invalide ou expiré' 
+                });
+              }
+            }
+          } catch (error) {
+            sendResponse({ 
+              success: false, 
+              error: error.message 
+            });
+          }
+        } else {
+          sendResponse({ 
+            success: false, 
+            error: 'Non connecté à Twitch' 
+          });
+        }
+      });
+      return true;
+
+    case "openSettings":
+      chrome.tabs.create({ 
+        url: chrome.runtime.getURL('settings/settings.html') 
+      });
+      sendResponse({ success: true });
       return true;
 
     default:
@@ -460,19 +596,39 @@ function generateRandomState(length) {
     .join("");
 }
 
+// Fonction pour convertir le tier Twitch en texte lisible
+function convertTierToText(tier) {
+  switch(tier) {
+    case '1000': return 'Tier 1';
+    case '2000': return 'Tier 2';
+    case '3000': return 'Tier 3';
+    default: return 'Tier Inconnu';
+  }
+}
+
 // Ajouter cette nouvelle fonction pour récupérer les informations d'abonnement
 async function getSubscriptionInfo(broadcasterLogin) {
   try {
     // Vérifier si on a un token utilisateur
     const storage = await chrome.storage.local.get(['twitchUserToken', 'twitchTokenTimestamp']);
+    
+    // Si pas de token, retourner un objet indiquant que l'utilisateur n'est pas connecté
     if (!storage.twitchUserToken) {
-      throw new Error("Non connecté à Twitch");
+      return {
+        isSubscribed: false,
+        isAuthenticated: false,
+        message: "Non connecté à Twitch"
+      };
     }
 
     // Vérifier si le token n'est pas expiré (plus de 4 heures)
     const tokenAge = Date.now() - (storage.twitchTokenTimestamp || 0);
     if (tokenAge > 4 * 60 * 60 * 1000) { // 4 heures en millisecondes
-      throw new Error("Token expiré, veuillez vous reconnecter");
+      return {
+        isSubscribed: false,
+        isAuthenticated: false,
+        message: "Token expiré, veuillez vous reconnecter"
+      };
     }
 
     // D'abord, obtenir l'ID du broadcaster
@@ -550,22 +706,246 @@ async function getSubscriptionInfo(broadcasterLogin) {
     
     if (!subData.data || subData.data.length === 0) {
       return {
-        isSubscribed: false
+        isSubscribed: false,
+        isAuthenticated: true
       };
     }
 
     const subscription = subData.data[0];
     return {
       isSubscribed: true,
+      isAuthenticated: true,
       tier: subscription.tier,
+      tierText: convertTierToText(subscription.tier),
       end_date: new Date(subscription.expires_at || Date.now() + (30 * 24 * 60 * 60 * 1000)),
       broadcaster_name: subscription.broadcaster_name,
-      plan_name: subscription.plan_name
+      plan_name: subscription.plan_name,
+      // Ajouter des informations sur le gift si disponible
+      gifter: subscription.gifter_name ? {
+        name: subscription.gifter_name,
+        message: `Abonnement offert par ${subscription.gifter_name}`
+      } : null
     };
 
   } catch (error) {
     console.error("Erreur détaillée dans getSubscriptionInfo:", error);
     addLog(`Erreur getSubscriptionInfo: ${error.message}`);
-    throw error;
+    
+    // Retourner un objet avec plus d'informations en cas d'erreur
+    return {
+      isSubscribed: false,
+      isAuthenticated: false,
+      message: error.message
+    };
   }
 }
+
+// Suppression de l'alarme de scraping mensuel
+chrome.alarms.clearAll();
+
+// Fonction pour mettre à jour les paramètres de notification
+function updateNotificationSettings(settings) {
+  // Configurer les notifications en fonction des paramètres
+  if (settings.streamNotifications) {
+    // Activer les notifications
+    chrome.notifications.onClicked.addListener(handleNotificationClick);
+  } else {
+    // Désactiver les notifications
+    chrome.notifications.onClicked.removeListener(handleNotificationClick);
+  }
+
+  // Gérer le son des notifications
+  switch (settings.notificationSound) {
+    case 'default':
+      // Utiliser le son par défaut
+      break;
+    case 'twitch':
+      // Charger un son personnalisé Twitch
+      break;
+    case 'none':
+      // Désactiver le son
+      break;
+  }
+}
+
+// Gestionnaire de clic sur les notifications
+function handleNotificationClick(notificationId) {
+  // Ouvrir le stream Twitch ou effectuer une action spécifique
+  chrome.tabs.create({ 
+    url: `https://www.twitch.tv/${TWITCH_USERNAME}` 
+  });
+}
+
+// Fonction de débogage améliorée
+function debugLog(message, settings) {
+  if (settings.debugMode) {
+    console.log(`[DEBUG] ${message}`);
+    addLog(message);
+  }
+}
+
+// Charger les paramètres au démarrage
+chrome.storage.sync.get('extensionSettings', (result) => {
+  const settings = result.extensionSettings || DEFAULT_SETTINGS;
+  setupAlarms(settings.checkFrequency);
+});
+
+// Fonction pour gérer l'auto-refresh si activé
+function handleAutoRefresh(settings) {
+  if (settings.autoRefresh) {
+    // Implémenter la logique d'actualisation automatique
+    chrome.tabs.query({ url: `https://www.twitch.tv/${TWITCH_USERNAME}` }, (tabs) => {
+      if (tabs.length > 0) {
+        chrome.tabs.reload(tabs[0].id);
+      }
+    });
+  }
+}
+
+// Ajouter une fonction de vérification des paramètres
+function validateSettings(settings) {
+  const validatedSettings = { ...DEFAULT_SETTINGS };
+  
+  // Valider chaque paramètre
+  validatedSettings.streamNotifications = !!settings.streamNotifications;
+  validatedSettings.notificationSound = 
+    ['default', 'twitch', 'none'].includes(settings.notificationSound) 
+      ? settings.notificationSound 
+      : DEFAULT_SETTINGS.notificationSound;
+  
+  validatedSettings.checkFrequency = 
+    settings.checkFrequency > 0 
+      ? Math.min(settings.checkFrequency, 600) // Limiter à 10 minutes max
+      : DEFAULT_SETTINGS.checkFrequency;
+  
+  validatedSettings.autoRefresh = !!settings.autoRefresh;
+  validatedSettings.theme = 
+    ['dark', 'light', 'neon'].includes(settings.theme) 
+      ? settings.theme 
+      : DEFAULT_SETTINGS.theme;
+  
+  validatedSettings.debugMode = !!settings.debugMode;
+
+  return validatedSettings;
+}
+
+// Fonction pour valider le token Twitch
+async function validateTwitchToken(token) {
+  try {
+    const validateResponse = await fetch('https://id.twitch.tv/oauth2/validate', {
+      headers: {
+        'Authorization': `OAuth ${token}`
+      }
+    });
+    
+    if (!validateResponse.ok) {
+      // Token invalide
+      return { 
+        valid: false, 
+        error: 'Token invalide ou expiré' 
+      };
+    }
+    
+    const validateData = await validateResponse.json();
+    
+    // Vérifier la validité du token
+    const isValid = validateData.expires_in > 0 && 
+                    validateData.client_id === TWITCH_CLIENT_ID;
+    
+    return {
+      valid: isValid,
+      userData: {
+        login: validateData.login,
+        user_id: validateData.user_id,
+        expires_in: validateData.expires_in,
+        scopes: validateData.scopes
+      }
+    };
+  } catch (error) {
+    console.error('Erreur de validation du token:', error);
+    return { 
+      valid: false, 
+      error: `Erreur de validation: ${error.message}` 
+    };
+  }
+}
+
+// Fonction pour rafraîchir le token Twitch
+async function refreshTwitchToken() {
+  try {
+    // Récupérer le token actuel et son timestamp
+    const storage = await chrome.storage.local.get(['twitchUserToken', 'twitchTokenTimestamp']);
+    
+    if (!storage.twitchUserToken) {
+      throw new Error('Aucun token existant');
+    }
+    
+    // Valider le token actuel
+    const validationResult = await validateTwitchToken(storage.twitchUserToken);
+    
+    if (validationResult.valid) {
+      // Token encore valide, pas besoin de le rafraîchir
+      return {
+        success: true,
+        token: storage.twitchUserToken,
+        message: 'Token toujours valide'
+      };
+    }
+    
+    // Lancer le flux d'authentification pour obtenir un nouveau token
+    const authResult = await authenticateTwitch();
+    
+    if (!authResult.success) {
+      throw new Error('Échec de la réauthentification');
+    }
+    
+    return {
+      success: true,
+      token: authResult.token,
+      message: 'Token rafraîchi avec succès'
+    };
+  } catch (error) {
+    console.error('Erreur lors du rafraîchissement du token:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// Ajouter une fonction pour surveiller et rafraîchir automatiquement le token
+async function monitorTwitchToken() {
+  try {
+    const storage = await chrome.storage.local.get(['twitchUserToken', 'twitchTokenTimestamp']);
+    
+    if (!storage.twitchUserToken) return;
+    
+    const tokenAge = Date.now() - (storage.twitchTokenTimestamp || 0);
+    const TOKEN_REFRESH_THRESHOLD = 3 * 24 * 60 * 60 * 1000; // 3 jours
+    
+    if (tokenAge > TOKEN_REFRESH_THRESHOLD) {
+      const refreshResult = await refreshTwitchToken();
+      
+      if (refreshResult.success) {
+        addLog(`Token Twitch automatiquement rafraîchi`);
+      } else {
+        addLog(`Échec du rafraîchissement automatique du token: ${refreshResult.error}`);
+      }
+    }
+  } catch (error) {
+    console.error('Erreur lors de la surveillance du token:', error);
+    addLog(`Erreur de surveillance du token: ${error.message}`);
+  }
+}
+
+// Planifier la surveillance du token
+chrome.alarms.create('monitorTwitchToken', {
+  periodInMinutes: 60 * 24, // Toutes les 24 heures
+});
+
+// Écouteur d'alarme pour la surveillance du token
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'monitorTwitchToken') {
+    monitorTwitchToken();
+  }
+});

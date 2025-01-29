@@ -270,3 +270,59 @@ body {
 .dev-button:hover {
   background-color: #d4ac0d;
 }
+
+#subscription-details {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: rgba(36, 36, 44, 0.5);
+  border-radius: 8px;
+}
+
+#subInfo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.sub-status {
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.sub-status.not-authenticated {
+  color: #ff4444;
+}
+
+.sub-status.not-subscribed {
+  color: #adadb8;
+}
+
+.sub-status.subscribed {
+  color: #9146ff;
+}
+
+.sub-expiration {
+  font-size: 12px;
+  color: #adadb8;
+  margin-bottom: 5px;
+}
+
+.sub-plan {
+  font-size: 12px;
+  color: #adadb8;
+}
+
+#nextPaymentDate {
+  text-align: center;
+  color: #adadb8;
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.next-payment-date {
+  text-align: center;
+  color: #adadb8;
+  font-size: 12px;
+  margin-top: 5px;
+}
