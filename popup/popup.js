@@ -145,6 +145,7 @@ function updateStreamInfo(streamData) {
   const streamPreview = document.getElementById("streamPreview");
   const uptime = document.getElementById("uptime");
   const streamStatus = document.getElementById("streamStatus");
+  const streamDetailsDiv = document.getElementById("stream-details");
 
   // Vérifier si tous les éléments existent
   if (
@@ -153,7 +154,8 @@ function updateStreamInfo(streamData) {
     !gameName ||
     !streamPreview ||
     !uptime ||
-    !streamStatus
+    !streamStatus ||
+    !streamDetailsDiv
   ) {
     console.error("Certains éléments DOM sont manquants");
     return;
@@ -170,34 +172,57 @@ function updateStreamInfo(streamData) {
     streamStatus.classList.remove("offline");
     streamStatus.classList.add("live");
 
-    // Mettre à jour les informations du stream
-    viewerContainer.classList.remove("hidden");
-    viewerCount.textContent = stream.viewer_count.toLocaleString();
-    gameName.textContent = stream.game_name;
-    gameName.classList.remove("offline");
-
-    // Mettre à jour la preview
-    const thumbnailUrl = stream.thumbnail_url
-      .replace("{width}", "320")
-      .replace("{height}", "180");
-    streamPreview.src = thumbnailUrl;
-    streamPreview.classList.remove("offline");
-
-    // Calculer et afficher l'uptime
+    // Calculer l'uptime
     const startTime = new Date(stream.started_at);
     const now = new Date();
     const diff = now - startTime;
     const hours = Math.floor(diff / 3600000);
     const minutes = Math.floor((diff % 3600000) / 60000);
-    uptime.textContent = `Uptime: ${hours}h${minutes
-      .toString()
-      .padStart(2, "0")}`;
+
+    // Mettre à jour les détails du stream avec la nouvelle mise en page
+    streamDetailsDiv.innerHTML = `
+      <div style="position: relative;">
+        <img src="${stream.thumbnail_url.replace('{width}', '320').replace('{height}', '180')}" 
+             alt="Stream Thumbnail" 
+             class="stream-preview">
+        <span class="uptime" style="position: absolute; top: 8px; left: 8px;">
+          ${hours}h${minutes.toString().padStart(2, "0")}
+        </span>
+      </div>
+      <p class="title">${stream.title}</p>
+      <div class="game-info">
+        <img src="${stream.gameImageUrl || ''}" 
+             alt="${stream.game_name}" 
+             class="game-image"
+             id="gameImage">
+        <span>${stream.game_name}</span>
+      </div>
+      <p class="viewer-count">👥 ${stream.viewer_count.toLocaleString()} spectateurs</p>
+    `;
+
+    // Ajouter le gestionnaire d'événements pour l'image de la catégorie
+    const gameImage = document.getElementById('gameImage');
+    if (gameImage) {
+      gameImage.addEventListener('error', function() {
+        this.style.display = 'none';
+      });
+    }
+
+    // Mettre à jour les autres éléments
+    viewerContainer.classList.remove("hidden");
+    viewerCount.textContent = stream.viewer_count.toLocaleString();
+    gameName.textContent = stream.game_name;
+    gameName.classList.remove("offline");
     uptime.classList.remove("offline");
+
   } else {
     // État offline
     streamStatus.textContent = "HORS LIGNE";
     streamStatus.classList.remove("live");
     streamStatus.classList.add("offline");
+
+    // Nettoyer les détails du stream
+    streamDetailsDiv.innerHTML = '';
 
     // Cacher les éléments
     viewerContainer.classList.add("hidden");
@@ -446,7 +471,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           </div>
           <p class="title">${streamData.title}</p>
           <div class="game-info">
-            <img src="${streamData.gameImageUrl}" alt="${streamData.game_name}" class="game-image">
+            <img src="${streamData.gameImageUrl || ''}" alt="${streamData.game_name}" class="game-image">
             <span>${streamData.game_name}</span>
           </div>
           <p class="viewer-count">👥 ${streamData.viewer_count.toLocaleString()} spectateurs</p>

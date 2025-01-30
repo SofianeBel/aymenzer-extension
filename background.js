@@ -1,4 +1,4 @@
-const TWITCH_USERNAME = "AymenZeR";
+const TWITCH_USERNAME = "talmo";
 const TWITCH_CLIENT_ID = "8xiery290o0ioczddjogf337p1etp7";
 const TWITCH_CLIENT_SECRET = "sz36mo8huivxyd3bqtbzhqq2ukkk7y";
 
@@ -96,29 +96,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "checkTwitchStatus":
-      chrome.storage.local.get(
-        [STORAGE_KEYS.TWITCH_DATA, STORAGE_KEYS.IS_LIVE],
-        async (result) => {
-          console.log("Données récupérées pour checkTwitchStatus:", result);
-
-          if (result[STORAGE_KEYS.TWITCH_DATA]) {
-            sendResponse({
-              streamData: result[STORAGE_KEYS.TWITCH_DATA],
-              isLive: result[STORAGE_KEYS.IS_LIVE],
-            });
-          } else {
-            try {
-              const streamData = await checkTwitch();
-              sendResponse({
-                streamData,
-                isLive: streamData.data && streamData.data.length > 0,
-              });
-            } catch (error) {
-              sendResponse({ error: error.message });
-            }
-          }
-        }
-      );
+      checkTwitchStatus()
+        .then(streamData => sendResponse({
+          streamData,
+          isLive: streamData.data && streamData.data.length > 0,
+        }))
+        .catch(error => sendResponse({ error: error.message }));
       return true;
 
     case "checkTwitch":
@@ -949,3 +932,118 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     monitorTwitchToken();
   }
 });
+
+// Fonction pour obtenir un token d'accès
+async function getAccessToken() {
+  try {
+    // Vérifier d'abord si nous avons un token utilisateur valide
+    const storage = await chrome.storage.local.get(['twitchUserToken']);
+    if (storage.twitchUserToken) {
+      // Valider le token utilisateur
+      const validationResult = await validateTwitchToken(storage.twitchUserToken);
+      if (validationResult.valid) {
+        return storage.twitchUserToken;
+      }
+    }
+
+    // Si pas de token utilisateur valide, obtenir un token client
+    const tokenResponse = await fetch('https://id.twitch.tv/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: TWITCH_CLIENT_ID,
+        client_secret: TWITCH_CLIENT_SECRET,
+        grant_type: 'client_credentials'
+      })
+    });
+
+    if (!tokenResponse.ok) {
+      throw new Error(`Erreur lors de l'obtention du token: ${tokenResponse.status}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    return tokenData.access_token;
+  } catch (error) {
+    console.error('Erreur dans getAccessToken:', error);
+    throw error;
+  }
+}
+
+async function checkTwitchStatus() {
+  try {
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      console.error('Pas de token d\'accès disponible');
+      return { success: false, error: 'Pas de token d\'accès' };
+    }
+
+    // Récupérer les informations du stream
+    const streamResponse = await fetch(
+      'https://api.twitch.tv/helix/streams?user_login=aymenzer',
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Client-Id': TWITCH_CLIENT_ID
+        }
+      }
+    );
+
+    if (!streamResponse.ok) {
+      throw new Error(`Erreur API Twitch: ${streamResponse.status}`);
+    }
+
+    const streamData = await streamResponse.json();
+
+    // Si le stream est en ligne, récupérer les informations de la catégorie
+    if (streamData.data && streamData.data.length > 0) {
+      const stream = streamData.data[0];
+      const gameId = stream.game_id;
+
+      if (gameId) {
+        // Récupérer les informations de la catégorie
+        const gameResponse = await fetch(
+          `https://api.twitch.tv/helix/games?id=${gameId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Client-Id': TWITCH_CLIENT_ID
+            }
+          }
+        );
+
+        if (gameResponse.ok) {
+          const gameData = await gameResponse.json();
+          if (gameData.data && gameData.data.length > 0) {
+            // Ajouter l'URL de l'image de la catégorie aux données du stream
+            stream.gameImageUrl = gameData.data[0].box_art_url
+              .replace('{width}', '138')
+              .replace('{height}', '190');
+          }
+        }
+      }
+
+      // Mettre à jour le stockage avec les nouvelles données
+      await chrome.storage.local.set({
+        'twitchData': streamData,
+        'isLive': true,
+        'lastCheck': Date.now()
+      });
+
+      return { success: true, streamData: streamData };
+    } else {
+      // Stream hors ligne
+      await chrome.storage.local.set({
+        'twitchData': null,
+        'isLive': false,
+        'lastCheck': Date.now()
+      });
+
+      return { success: true, streamData: null };
+    }
+  } catch (error) {
+    console.error('Erreur lors de la vérification du statut:', error);
+    return { success: false, error: error.message };
+  }
+}
