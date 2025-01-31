@@ -4,7 +4,7 @@ const STORAGE_KEYS = {
   TWITCH_DATA: "twitchData",
   LAST_CHECK: "lastCheck",
   SUB_INFO: "subInfo",
-  TWITCH_CONNECTION: "twitchConnection"  // Nouvelle clé pour l'état de connexion
+  TWITCH_CONNECTION: "twitchConnection"
 };
 
 // ===== Fonction de mise à jour de l'interface utilisateur =====
@@ -143,26 +143,16 @@ function updateStreamInfo(streamData) {
   const viewerContainer = document.getElementById("viewerContainer");
   const gameName = document.getElementById("gameName");
   const streamPreview = document.getElementById("streamPreview");
-  const uptime = document.getElementById("uptime");
   const streamStatus = document.getElementById("streamStatus");
   const streamDetailsDiv = document.getElementById("stream-details");
 
   // Vérifier si tous les éléments existent
-  if (
-    !viewerCount ||
-    !viewerContainer ||
-    !gameName ||
-    !streamPreview ||
-    !uptime ||
-    !streamStatus ||
-    !streamDetailsDiv
-  ) {
+  if (!viewerCount || !viewerContainer || !gameName || !streamPreview || !streamStatus || !streamDetailsDiv) {
     console.error("Certains éléments DOM sont manquants");
     return;
   }
 
-  const isStreamLive =
-    streamData && streamData.data && streamData.data.length > 0;
+  const isStreamLive = streamData && streamData.data && streamData.data.length > 0;
 
   if (isStreamLive) {
     const stream = streamData.data[0];
@@ -172,12 +162,12 @@ function updateStreamInfo(streamData) {
     streamStatus.classList.remove("offline");
     streamStatus.classList.add("live");
 
-    // Calculer l'uptime
-    const startTime = new Date(stream.started_at);
-    const now = new Date();
-    const diff = now - startTime;
-    const hours = Math.floor(diff / 3600000);
-    const minutes = Math.floor((diff % 3600000) / 60000);
+    // Calculer l'uptime correctement
+    const startTime = new Date(stream.started_at).getTime();
+    const currentTime = new Date().getTime();
+    const uptimeMilliseconds = currentTime - startTime;
+    const hours = Math.floor(uptimeMilliseconds / (1000 * 60 * 60));
+    const minutes = Math.floor((uptimeMilliseconds % (1000 * 60 * 60)) / (1000 * 60));
 
     // Mettre à jour les détails du stream avec la nouvelle mise en page
     streamDetailsDiv.innerHTML = `
@@ -213,7 +203,6 @@ function updateStreamInfo(streamData) {
     viewerCount.textContent = stream.viewer_count.toLocaleString();
     gameName.textContent = stream.game_name;
     gameName.classList.remove("offline");
-    uptime.classList.remove("offline");
 
   } else {
     // État offline
@@ -228,26 +217,33 @@ function updateStreamInfo(streamData) {
     viewerContainer.classList.add("hidden");
     gameName.classList.add("offline");
     streamPreview.classList.add("offline");
-    uptime.classList.add("offline");
   }
 }
 
 // ===== Fonction de rafraîchissement des données =====
+const REFRESH_INTERVAL = 60000; // 60 secondes
+let lastRefreshTime = 0;
+
 async function refreshData() {
+  const now = Date.now();
+  // Ne rafraîchir que si au moins 60 secondes se sont écoulées
+  if (now - lastRefreshTime < REFRESH_INTERVAL) {
+    return;
+  }
+
   try {
     const response = await chrome.runtime.sendMessage({
       action: "checkTwitchStatus",
     });
     if (response && response.streamData) {
       updateStreamInfo(response.streamData);
+      console.log(response.streamData);
+      lastRefreshTime = now;
     }
   } catch (error) {
     console.error("Erreur lors du rafraîchissement des données:", error);
   }
 }
-
-// ===== Configuration de l'intervalle de rafraîchissement =====
-const REFRESH_INTERVAL = 500;
 
 // ===== Gestionnaire principal du chargement de la page =====
 document.addEventListener("DOMContentLoaded", async () => {
@@ -447,48 +443,71 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  const statusDiv = document.getElementById('streamStatus');
-  const joinButton = document.getElementById('joinStream');
-  const streamDetailsDiv = document.getElementById('stream-details');
-
   function updatePopup(isLive, streamData) {
-    if (isLive && streamData) {
-      const startTime = new Date(streamData.started_at);
-      const currentTime = new Date();
-      const uptimeDiff = currentTime - startTime;
+    // Utiliser les IDs qui existent déjà dans le code
+    const statusDiv = document.getElementById('streamStatus');
+    const streamDetailsDiv = document.getElementById('stream-details');
+
+    // Vérifier si les éléments existent
+    if (!statusDiv) {
+      console.error("Élément streamStatus non trouvé");
+      return;
+    }
+
+    if (!streamDetailsDiv) {
+      console.error("Élément stream-details non trouvé");
+      return;
+    }
+
+    if (isLive && streamData && streamData.data && streamData.data[0]) {
+      const stream = streamData.data[0];
+      const startTime = new Date(stream.started_at);
+      const uptimeDiff = new Date() - startTime;
       const hours = Math.floor(uptimeDiff / (1000 * 60 * 60));
       const minutes = Math.floor((uptimeDiff % (1000 * 60 * 60)) / (1000 * 60));
 
       statusDiv.textContent = '🔴 EN DIRECT';
+      statusDiv.classList.remove('offline');
+      statusDiv.classList.add('live');
       
-      if (streamDetailsDiv) {
-        streamDetailsDiv.innerHTML = `
-          <div style="position: relative;">
-            <img src="${streamData.thumbnail_url.replace('{width}', '320').replace('{height}', '180')}" alt="Stream Thumbnail">
-            <span class="uptime" style="position: absolute; top: 8px; left: 8px;">
-              ${hours}h ${minutes}m
-            </span>
-          </div>
-          <p class="title">${streamData.title}</p>
-          <div class="game-info">
-            <img src="${streamData.gameImageUrl || ''}" alt="${streamData.game_name}" class="game-image">
-            <span>${streamData.game_name}</span>
-          </div>
-          <p class="viewer-count">👥 ${streamData.viewer_count.toLocaleString()} spectateurs</p>
-        `;
-      } else {
-        console.error("Elément avec l'ID 'stream-details' introuvable dans le DOM.");
+      // Créer le HTML avec des vérifications de sécurité
+      const thumbnailUrl = stream.thumbnail_url 
+        ? stream.thumbnail_url.replace('{width}', '320').replace('{height}', '180')
+        : '';
+      
+      const gameImageUrl = stream.gameImageUrl || '';
+      const gameName = stream.game_name || 'Jeu inconnu';
+      const title = stream.title || '';
+      const viewerCount = stream.viewer_count || 0;
+
+      streamDetailsDiv.innerHTML = `
+        <div style="position: relative;">
+          ${thumbnailUrl ? `<img src="${thumbnailUrl}" alt="Stream Thumbnail" class="stream-preview">` : ''}
+          <span class="uptime" style="position: absolute; top: 8px; left: 8px;">
+            ${hours}h${minutes.toString().padStart(2, "0")}
+          </span>
+        </div>
+        <p class="title">${title}</p>
+        <div class="game-info">
+          ${gameImageUrl ? `<img src="${gameImageUrl}" alt="${gameName}" class="game-image" id="gameImage">` : ''}
+          <span>${gameName}</span>
+        </div>
+        <p class="viewer-count">👥 ${viewerCount.toLocaleString()} spectateurs</p>
+      `;
+
+      // Ajouter le gestionnaire d'événements pour l'image de la catégorie
+      const gameImage = document.getElementById('gameImage');
+      if (gameImage) {
+        gameImage.addEventListener('error', function() {
+          this.style.display = 'none';
+        });
       }
-      
-      joinButton.style.display = 'block';
     } else {
       statusDiv.textContent = 'HORS LIGNE';
+      statusDiv.classList.remove('live');
+      statusDiv.classList.add('offline');
       
-      if (streamDetailsDiv) {
-        streamDetailsDiv.innerHTML = '';
-      }
-      
-      joinButton.style.display = 'none';
+      streamDetailsDiv.innerHTML = '';
     }
   }
 
@@ -510,16 +529,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   );
 
-  // ===== Gestion du bouton Rejoindre le Stream =====
-  if (joinButton) {
-    joinButton.addEventListener('click', function() {
-      chrome.tabs.create({ url: `https://www.twitch.tv/AymenZeR` });
-      console.log('Opening Twitch stream...');
-    });
-  } else {
-    console.warn("Bouton Rejoindre le Stream introuvable.");
-  }
-
   // Initialiser la structure des éléments d'abonnement
   function initializeSubscriptionElements() {
     const subscriptionDetailsDiv = document.getElementById('subscription-details');
@@ -531,7 +540,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Créer l'élément subInfo s'il n'existe pas déjà
     let subInfoDiv = document.getElementById('subInfo');
     if (!subInfoDiv) {
-      console.log("Création de l'élément subInfo"); // Log pour déboguer
       subInfoDiv = document.createElement('div');
       subInfoDiv.id = 'subInfo';
       subInfoDiv.classList.add('sub-info', 'hidden');
