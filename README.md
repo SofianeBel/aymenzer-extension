@@ -22,8 +22,10 @@ Cette extension :
 - Ne collecte aucune donnée personnelle
 - Ne partage aucune information avec des tiers
 
-## Support
-Pour tout problème ou suggestion, veuillez ouvrir une issue sur GitHub.
+## Support et Contribution
+- Pour signaler un bug : [Ouvrir une issue](https://github.com/sifly789/aymenzer-extension/issues)
+- Pour des suggestions : [Créer une discussion](https://github.com/sifly789/aymenzer-extension/discussions)
+- Email : Sifly789@gmail.com
 
 ## Licence
-MIT License - Voir le fichier LICENSE pour plus de détails. 
+Ce projet est sous licence MIT - voir le fichier [LICENSE](LICENSE) pour plus de détails. 
