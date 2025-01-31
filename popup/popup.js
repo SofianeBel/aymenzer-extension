@@ -7,6 +7,84 @@ const STORAGE_KEYS = {
   TWITCH_CONNECTION: "twitchConnection"
 };
 
+// ===== Système de gestion des erreurs et logs =====
+const Logger = {
+  DEBUG: 0,
+  INFO: 1,
+  WARN: 2,
+  ERROR: 3,
+  
+  level: 1, // Niveau par défaut : INFO
+
+  log(level, message, error = null) {
+    if (level >= this.level) {
+      const timestamp = new Date().toISOString();
+      const prefix = ['DEBUG', 'INFO', 'WARN', 'ERROR'][level];
+      console.log(`[${timestamp}] [${prefix}] ${message}`);
+      if (error) {
+        console.error(error);
+      }
+    }
+  },
+
+  debug(message) { this.log(this.DEBUG, message); },
+  info(message) { this.log(this.INFO, message); },
+  warn(message, error = null) { this.log(this.WARN, message, error); },
+  error(message, error = null) { this.log(this.ERROR, message, error); }
+};
+
+// ===== Système de gestion du cache =====
+const Cache = {
+  storage: new Map(),
+
+  set(key, value, ttl = 60000) { // TTL par défaut : 1 minute
+    this.storage.set(key, {
+      value,
+      expiry: Date.now() + ttl
+    });
+    Logger.debug(`Cache: Set ${key} with TTL ${ttl}ms`);
+  },
+
+  get(key) {
+    const item = this.storage.get(key);
+    if (!item) {
+      Logger.debug(`Cache: Miss for ${key}`);
+      return null;
+    }
+    if (Date.now() > item.expiry) {
+      Logger.debug(`Cache: Expired for ${key}`);
+      this.storage.delete(key);
+      return null;
+    }
+    Logger.debug(`Cache: Hit for ${key}`);
+    return item.value;
+  },
+
+  clear() {
+    this.storage.clear();
+    Logger.debug('Cache: Cleared');
+  }
+};
+
+// ===== Système de retry pour les appels réseau =====
+async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 1000) {
+  let retries = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      retries++;
+      if (retries > maxRetries) {
+        Logger.error('Max retries reached', error);
+        throw error;
+      }
+      const delay = baseDelay * Math.pow(2, retries - 1);
+      Logger.warn(`Retry ${retries}/${maxRetries} after ${delay}ms`, error);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 // ===== Fonction de mise à jour de l'interface utilisateur =====
 function updateUIState(connectionData) {
   const connectBtn = document.getElementById('twitch-connect-btn');
@@ -136,88 +214,82 @@ function updateSubscriptionInfo(subData) {
 }
 
 // ===== Fonction de mise à jour des informations du stream =====
-function updateStreamInfo(streamData) {
-  if (!streamData) return;
-
-  const viewerCount = document.getElementById("viewerCount");
-  const viewerContainer = document.getElementById("viewerContainer");
-  const gameName = document.getElementById("gameName");
-  const streamPreview = document.getElementById("streamPreview");
-  const streamStatus = document.getElementById("streamStatus");
-  const streamDetailsDiv = document.getElementById("stream-details");
-
-  // Vérifier si tous les éléments existent
-  if (!viewerCount || !viewerContainer || !gameName || !streamPreview || !streamStatus || !streamDetailsDiv) {
-    console.error("Certains éléments DOM sont manquants");
-    return;
-  }
-
-  const isStreamLive = streamData && streamData.data && streamData.data.length > 0;
-
-  if (isStreamLive) {
-    const stream = streamData.data[0];
-
-    // Mettre à jour le statut
-    streamStatus.textContent = "🔴 EN DIRECT";
-    streamStatus.classList.remove("offline");
-    streamStatus.classList.add("live");
-
-    // Calculer l'uptime correctement
-    const startTime = new Date(stream.started_at).getTime();
-    const currentTime = new Date().getTime();
-    const uptimeMilliseconds = currentTime - startTime;
-    const hours = Math.floor(uptimeMilliseconds / (1000 * 60 * 60));
-    const minutes = Math.floor((uptimeMilliseconds % (1000 * 60 * 60)) / (1000 * 60));
-
-    // Mettre à jour les détails du stream avec la nouvelle mise en page
-    streamDetailsDiv.innerHTML = `
-      <div style="position: relative;">
-        <img src="${stream.thumbnail_url.replace('{width}', '320').replace('{height}', '180')}" 
-             alt="Stream Thumbnail" 
-             class="stream-preview">
-        <span class="uptime" style="position: absolute; top: 8px; left: 8px;">
-          ${hours}h${minutes.toString().padStart(2, "0")}
-        </span>
-      </div>
-      <p class="title">${stream.title}</p>
-      <div class="game-info">
-        <img src="${stream.gameImageUrl || ''}" 
-             alt="${stream.game_name}" 
-             class="game-image"
-             id="gameImage">
-        <span>${stream.game_name}</span>
-      </div>
-      <p class="viewer-count">👥 ${stream.viewer_count.toLocaleString()} spectateurs</p>
-    `;
-
-    // Ajouter le gestionnaire d'événements pour l'image de la catégorie
-    const gameImage = document.getElementById('gameImage');
-    if (gameImage) {
-      gameImage.addEventListener('error', function() {
-        this.style.display = 'none';
-      });
+async function updateStreamInfo() {
+  try {
+    const streamStatus = document.getElementById('streamStatus');
+    const streamDetailsDiv = document.getElementById('streamDetails');
+    
+    if (!streamStatus || !streamDetailsDiv) {
+      Logger.error('Required DOM elements not found');
+      return;
     }
 
-    // Mettre à jour les autres éléments
-    viewerContainer.classList.remove("hidden");
-    viewerCount.textContent = stream.viewer_count.toLocaleString();
-    gameName.textContent = stream.game_name;
-    gameName.classList.remove("offline");
+    // Vérifier le cache d'abord
+    const cachedData = Cache.get('streamInfo');
+    if (cachedData) {
+      updateUIWithData(cachedData);
+      return;
+    }
 
-  } else {
-    // État offline
-    streamStatus.textContent = "HORS LIGNE";
-    streamStatus.classList.remove("live");
-    streamStatus.classList.add("offline");
+    const response = await retryWithBackoff(async () => {
+      const result = await chrome.runtime.sendMessage({ action: 'checkTwitchStatus' });
+      if (!result) throw new Error('No response from background script');
+      return result;
+    });
 
-    // Nettoyer les détails du stream
-    streamDetailsDiv.innerHTML = '';
+    // Mettre en cache les données
+    Cache.set('streamInfo', response, 30000); // Cache pour 30 secondes
+    updateUIWithData(response);
 
-    // Cacher les éléments
-    viewerContainer.classList.add("hidden");
-    gameName.classList.add("offline");
-    streamPreview.classList.add("offline");
+  } catch (error) {
+    Logger.error('Failed to update stream info', error);
+    showError('Une erreur est survenue lors de la mise à jour des informations du stream', () => updateStreamInfo());
   }
+}
+
+// Fonction pour mettre à jour l'UI avec les données
+function updateUIWithData(data) {
+  const streamStatus = document.getElementById('streamStatus');
+  const streamDetailsDiv = document.getElementById('streamDetails');
+
+  if (data.isLive) {
+    Logger.info('Stream is live, updating UI');
+    streamStatus.textContent = 'EN DIRECT';
+    streamStatus.classList.add('live');
+    streamDetailsDiv.style.display = 'block';
+    
+    // Mise à jour des détails du stream...
+    updateStreamDetails(data);
+  } else {
+    Logger.info('Stream is offline');
+    streamStatus.textContent = 'HORS LIGNE';
+    streamStatus.classList.remove('live');
+    streamDetailsDiv.style.display = 'none';
+  }
+}
+
+// Fonction pour afficher les erreurs
+function showError(message, retryCallback = null) {
+  const errorDiv = document.createElement('div');
+  errorDiv.className = 'error-message';
+  
+  const errorText = document.createElement('p');
+  errorText.textContent = message;
+  errorDiv.appendChild(errorText);
+
+  if (retryCallback) {
+    const retryButton = document.createElement('button');
+    retryButton.className = 'retry-button';
+    retryButton.innerHTML = '<i class="fas fa-sync-alt"></i> Réessayer';
+    retryButton.onclick = () => {
+      errorDiv.remove();
+      retryCallback();
+    };
+    errorDiv.appendChild(retryButton);
+  }
+
+  const container = document.querySelector('.container');
+  container.insertBefore(errorDiv, container.firstChild);
 }
 
 // ===== Fonction de rafraîchissement des données =====
@@ -226,22 +298,52 @@ let lastRefreshTime = 0;
 
 async function refreshData() {
   const now = Date.now();
-  // Ne rafraîchir que si au moins 60 secondes se sont écoulées
   if (now - lastRefreshTime < REFRESH_INTERVAL) {
+    Logger.debug('Skipping refresh: too soon');
     return;
   }
 
   try {
+    // Vérifier le cache d'abord
+    const cachedData = await Cache.get('streamData');
+    if (cachedData) {
+      Logger.info('Using cached stream data');
+      updateStreamInfo(cachedData);
+      return;
+    }
+
+    // Si pas de cache, faire la requête
     const response = await chrome.runtime.sendMessage({
-      action: "checkTwitchStatus",
+      action: "checkTwitchStatus"
+    }).catch(error => {
+      Logger.error('Background script communication error', error);
+      throw new Error("Impossible de communiquer avec le background script");
     });
+
     if (response && response.streamData) {
+      Logger.info('Stream data refreshed successfully');
+      await Cache.set('streamData', response.streamData);
       updateStreamInfo(response.streamData);
-      console.log(response.streamData);
       lastRefreshTime = now;
     }
   } catch (error) {
-    console.error("Erreur lors du rafraîchissement des données:", error);
+    Logger.error('Data refresh failed', error);
+    const streamStatus = document.getElementById("streamStatus");
+    const streamDetailsDiv = document.getElementById("stream-details");
+    
+    if (streamStatus && streamDetailsDiv) {
+      streamStatus.textContent = "ERREUR";
+      streamStatus.classList.remove("live");
+      streamStatus.classList.add("offline");
+      streamDetailsDiv.innerHTML = `
+        <div class="error-message">
+          <p>Impossible de rafraîchir les données.</p>
+          <button onclick="refreshData()" class="retry-button">
+            <i class="fas fa-sync-alt"></i> Réessayer
+          </button>
+        </div>
+      `;
+    }
   }
 }
 

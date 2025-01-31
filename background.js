@@ -1,9 +1,17 @@
-const TWITCH_USERNAME = "talmo";
+const TWITCH_USERNAME = "AymenZeR";
 const TWITCH_CLIENT_ID = "8xiery290o0ioczddjogf337p1etp7";
 const TWITCH_CLIENT_SECRET = "sz36mo8huivxyd3bqtbzhqq2ukkk7y";
 
 // Configuration par défaut
 const DEFAULT_CHECK_INTERVAL = 60; // Vérification toutes les 60 secondes
+
+// Clés de stockage
+const STORAGE_KEYS = {
+  TWITCH_DATA: 'twitchData',
+  LAST_CHECK: 'lastCheck',
+  IS_LIVE: 'isLive',
+  TWITCH_CONNECTION: 'twitchConnection'
+};
 
 // Configuration par défaut des paramètres
 const DEFAULT_SETTINGS = {
@@ -24,12 +32,21 @@ function setupAlarms(checkInterval = DEFAULT_CHECK_INTERVAL) {
   // Convertir l'intervalle en minutes (minimum 1 minute)
   const intervalInMinutes = Math.max(1, checkInterval / 60);
   
+  console.log("Configuration des alarmes avec un intervalle de", intervalInMinutes, "minutes");
+  
   // Supprimer toute alarme existante
   chrome.alarms.clearAll(() => {
+    console.log("Alarmes précédentes supprimées");
     // Créer une nouvelle alarme
     chrome.alarms.create("checkTwitchStream", {
       delayInMinutes: 1, // Commencer après 1 minute
       periodInMinutes: intervalInMinutes
+    });
+    console.log("Nouvelle alarme créée");
+    
+    // Vérifier que l'alarme a bien été créée
+    chrome.alarms.getAll((alarms) => {
+      console.log("Alarmes actives après création:", alarms);
     });
   });
 }
@@ -276,6 +293,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true });
       return true;
 
+    case "testNotification":
+      testNotification()
+        .then(() => sendResponse({ success: true }))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
     default:
       console.error("Action inconnue:", request.action);
       sendResponse({ success: false, error: "Action inconnue" });
@@ -286,14 +309,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 const NOTIFICATION_TYPES = {
   TWITCH: "Twitch",
 };
-
-const STORAGE_KEYS = {
-  IS_LIVE: "isLive",
-  TWITCH_DATA: "twitchData",
-  LAST_CHECK: "lastCheck",
-};
-
-const DEFAULT_ICON = "icons/A_AE_neon_1.png";
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.checkFrequency) {
@@ -309,6 +324,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 async function checkTwitch() {
   try {
+    console.log("Début de checkTwitch");
     const storage = await chrome.storage.local.get([
       STORAGE_KEYS.TWITCH_DATA,
       STORAGE_KEYS.LAST_CHECK,
@@ -316,6 +332,12 @@ async function checkTwitch() {
       "lastStreamNotification",
       "firstTimeNotification",
     ]);
+
+    console.log("État actuel:", {
+      wasLive: storage[STORAGE_KEYS.IS_LIVE],
+      lastCheck: storage[STORAGE_KEYS.LAST_CHECK]?.twitch,
+      firstTimeNotification: storage.firstTimeNotification
+    });
 
     const now = Date.now();
     const isFirstTimeNotification = !storage.firstTimeNotification;
@@ -329,7 +351,7 @@ async function checkTwitch() {
       return storage[STORAGE_KEYS.TWITCH_DATA];
     }
 
-    // Obtenir le token et les données du stream comme avant...
+    // Obtenir le token
     const tokenData = await getAccessToken();
     
     if (!tokenData) {
@@ -344,8 +366,7 @@ async function checkTwitch() {
           "Client-ID": TWITCH_CLIENT_ID,
           "Authorization": `Bearer ${tokenData}`,
           "Accept": "application/json"
-        },
-        mode: "cors"
+        }
       }
     );
 
@@ -357,32 +378,69 @@ async function checkTwitch() {
     const streamData = await streamResponse.json();
     const isCurrentlyLive = streamData.data && streamData.data.length > 0;
 
-    // Vérifier si le stream vient de passer en direct
-    if (isCurrentlyLive && !wasLive) {
-      // Récupérer les paramètres de notification
-      const { extensionSettings } = await chrome.storage.sync.get('extensionSettings');
-      
-      if (extensionSettings?.streamNotifications) {
-        const stream = streamData.data[0];
-        // Créer la notification
-        chrome.notifications.create(
-          "streamLive",
-          {
-            type: "basic",
-            iconUrl: DEFAULT_ICON,
-            title: "Stream en direct !",
-            message: `${TWITCH_USERNAME} est en direct : ${stream.title}`,
-            buttons: [{ title: "Regarder" }],
-            requireInteraction: true,
-            priority: 2
+    if (isCurrentlyLive) {
+      console.log("Stream détecté en direct");
+      // Récupérer les informations de l'utilisateur et du jeu en parallèle
+      const [userData, gameData] = await Promise.all([
+        fetch(`https://api.twitch.tv/helix/users?login=${TWITCH_USERNAME}`, {
+          headers: {
+            'Client-ID': TWITCH_CLIENT_ID,
+            'Authorization': `Bearer ${tokenData}`
           }
-        );
+        }).then(response => response.json()),
+        fetch(`https://api.twitch.tv/helix/games?id=${streamData.data[0].game_id}`, {
+          headers: {
+            'Client-ID': TWITCH_CLIENT_ID,
+            'Authorization': `Bearer ${tokenData}`
+          }
+        }).then(response => response.json())
+      ]);
 
-        // Sauvegarder l'état de la notification
-        await chrome.storage.local.set({
-          lastStreamNotification: now,
-          firstTimeNotification: true
-        });
+      // Enrichir les données du stream
+      streamData.data[0] = {
+        ...streamData.data[0],
+        profileImageUrl: userData.data[0]?.profile_image_url,
+        gameImageUrl: gameData.data[0]?.box_art_url?.replace('{width}', '138').replace('{height}', '190'),
+        fetchedAt: now
+      };
+
+      // Vérifier si le stream vient de passer en direct
+      if (!wasLive) {
+        console.log("Changement d'état : le stream vient de passer en direct");
+        // Récupérer les paramètres de notification
+        const { extensionSettings } = await chrome.storage.sync.get('extensionSettings');
+        console.log("Paramètres de notification:", extensionSettings);
+        
+        if (extensionSettings?.streamNotifications) {
+          console.log("Création de la notification...");
+          const stream = streamData.data[0];
+          // Créer la notification
+          chrome.notifications.create(
+            "streamLive",
+            {
+              type: "basic",
+              iconUrl: stream.profileImageUrl || DEFAULT_ICON,
+              title: "Stream en direct !",
+              message: `${TWITCH_USERNAME} est en direct : ${stream.title}`,
+              buttons: [{ title: "Regarder" }],
+              requireInteraction: true,
+              priority: 2
+            },
+            (notificationId) => {
+              if (chrome.runtime.lastError) {
+                console.error("Erreur lors de la création de la notification:", chrome.runtime.lastError);
+              } else {
+                console.log("Notification créée avec succès, ID:", notificationId);
+              }
+            }
+          );
+
+          // Sauvegarder l'état de la notification
+          await chrome.storage.local.set({
+            lastStreamNotification: now,
+            firstTimeNotification: true
+          });
+        }
       }
     }
 
@@ -391,6 +449,13 @@ async function checkTwitch() {
       [STORAGE_KEYS.TWITCH_DATA]: streamData,
       [STORAGE_KEYS.LAST_CHECK]: { twitch: now },
       [STORAGE_KEYS.IS_LIVE]: isCurrentlyLive,
+    });
+
+    // Envoyer un message pour mettre à jour le popup
+    chrome.runtime.sendMessage({ 
+      message: "update_status", 
+      isLive: isCurrentlyLive, 
+      streamData: isCurrentlyLive ? streamData.data[0] : null 
     });
 
     return streamData;
@@ -695,11 +760,10 @@ chrome.alarms.clearAll();
 function updateNotificationSettings(settings) {
   // Configurer les notifications en fonction des paramètres
   if (settings.streamNotifications) {
-    // Activer les notifications
-    chrome.notifications.onClicked.addListener(handleNotificationClick);
+    // Les notifications sont déjà gérées par les écouteurs globaux
+    console.log('Notifications activées');
   } else {
-    // Désactiver les notifications
-    chrome.notifications.onClicked.removeListener(handleNotificationClick);
+    console.log('Notifications désactivées');
   }
 
   // Gérer le son des notifications
@@ -716,13 +780,30 @@ function updateNotificationSettings(settings) {
   }
 }
 
-// Gestionnaire de clic sur les notifications
-function handleNotificationClick(notificationId) {
-  // Ouvrir le stream Twitch ou effectuer une action spécifique
-  chrome.tabs.create({ 
-    url: `https://www.twitch.tv/${TWITCH_USERNAME}` 
-  });
-}
+// Gestionnaires des notifications
+const notificationHandlers = {
+  // Gestionnaire de clic sur les notifications
+  onClick: (notificationId) => {
+    if (notificationId === "streamLive") {
+      chrome.tabs.create({ 
+        url: `https://www.twitch.tv/${TWITCH_USERNAME}` 
+      });
+    }
+  },
+
+  // Gestionnaire de clic sur les boutons de notification
+  onButtonClick: (notificationId, buttonIndex) => {
+    if (notificationId === "streamLive" && buttonIndex === 0) {
+      chrome.tabs.create({ 
+        url: `https://www.twitch.tv/${TWITCH_USERNAME}` 
+      });
+    }
+  }
+};
+
+// Enregistrer les gestionnaires
+chrome.notifications.onClicked.addListener(notificationHandlers.onClick);
+chrome.notifications.onButtonClicked.addListener(notificationHandlers.onButtonClick);
 
 // Fonction de débogage améliorée
 function debugLog(message, settings) {
@@ -934,20 +1015,29 @@ async function getAccessToken() {
   }
 }
 
-// Gestionnaire de clic sur les notifications
-chrome.notifications.onClicked.addListener((notificationId) => {
-  if (notificationId === "streamLive") {
-    chrome.tabs.create({ 
-      url: `https://www.twitch.tv/${TWITCH_USERNAME}` 
-    });
-  }
-});
+// Fonction pour tester les notifications
+async function testNotification() {
+  console.log("Test de notification...");
+  const { extensionSettings } = await chrome.storage.sync.get('extensionSettings');
+  console.log("Paramètres actuels:", extensionSettings);
 
-// Gestionnaire de clic sur les boutons de notification
-chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
-  if (notificationId === "streamLive" && buttonIndex === 0) {
-    chrome.tabs.create({ 
-      url: `https://www.twitch.tv/${TWITCH_USERNAME}` 
-    });
-  }
-});
+  chrome.notifications.create(
+    "testNotification",
+    {
+      type: "basic",
+      iconUrl: DEFAULT_ICON,
+      title: "Test de Notification",
+      message: "Ceci est un test de notification. Si vous voyez ceci, les notifications fonctionnent !",
+      buttons: [{ title: "OK" }],
+      requireInteraction: true,
+      priority: 2
+    },
+    (notificationId) => {
+      if (chrome.runtime.lastError) {
+        console.error("Erreur lors du test de notification:", chrome.runtime.lastError);
+      } else {
+        console.log("Notification de test créée avec succès, ID:", notificationId);
+      }
+    }
+  );
+}

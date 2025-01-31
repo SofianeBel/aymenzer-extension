@@ -1,11 +1,10 @@
 <!-- Start of Selection -->
 <!DOCTYPE html>
-<html lang="fr"> <!-- Ajout de l'attribut lang pour spécifier la langue du document -->
+<html lang="fr">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- Ajout de la balise viewport pour une meilleure réactivité -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AymenZeR Notifier</title>
-<!-- End of Selection -->
     <link rel="stylesheet" href="../styles/popup.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   </head>
@@ -27,9 +26,6 @@
           </div>
         </div>
         
-        <div class="game-name" id="gameName">Chargement...</div>
-        <img id="streamPreview" class="stream-preview" src="" alt="Stream Preview">
-        
         <!-- Section dédiée aux détails du stream -->
         <div id="stream-details"></div>
         
@@ -37,19 +33,19 @@
         <div id="subscription-details">
           <div id="subInfo" class="sub-info hidden"></div>
         </div>
-        
+         
         <div class="action-buttons">
           <a href="https://www.twitch.tv/AymenZeR" target="_blank" rel="noopener" class="action-button twitch-button">
-            Twitch.tv/AymenZeR
+            <i class="fab fa-twitch"></i> Twitch.tv/AymenZeR
           </a>
           <button id="twitch-connect-btn" class="action-button login-button" aria-label="Se connecter à Twitch">
-            <i class="fab fa-twitch"></i> Se connecter
+            <i class="fas fa-sign-in-alt"></i> Se connecter
           </button>
           <button id="twitch-disconnect-btn" class="action-button login-button" style="display: none;" aria-label="Se déconnecter de Twitch">
-            <i class="fab fa-sign-out-alt"></i> Se déconnecter
+            <i class="fas fa-sign-out-alt"></i> Se déconnecter
           </button>
-          <button id="settingsBtn" class="action-button settings-button">
-            <i class="fas fa-cog"></i> Paramètres
+          <button id="settingsBtn" class="action-button settings-button" aria-label="Paramètres">
+            <i class="fas fa-cog"></i>
           </button>
         </div>
         
